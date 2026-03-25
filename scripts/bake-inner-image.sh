@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Pre-loads a worker image into a DinD image's inner Docker storage via
+# Pre-loads the sandbox image into a DinD image's inner Docker storage via
 # docker commit, so nested containers start with the image already cached.
-# Usage: ./bake-inner-image.sh <dind-image> <worker-tar> <output-tag> [worker-image-id] [worker-repo-digest]
+# Usage: ./bake-inner-image.sh <dind-image> <sandbox-tar> <output-tag> [sandbox-image-id] [ironclaw-version]
 set -euo pipefail
 
-USAGE="Usage: $0 <dind-image> <worker-tar> <output-tag> [worker-image-id] [worker-repo-digest]"
+USAGE="Usage: $0 <dind-image> <sandbox-tar> <output-tag> [sandbox-image-id] [ironclaw-version]"
 DIND_IMAGE="${1:?$USAGE}"
-WORKER_TAR="${2:?$USAGE}"
+SANDBOX_TAR="${2:?$USAGE}"
 OUTPUT_TAG="${3:?$USAGE}"
-WORKER_IMAGE_ID="${4:-}"
-WORKER_REPO_DIGEST="${5:-}"
+SANDBOX_IMAGE_ID="${4:-}"
+IRONCLAW_VERSION="${5:-}"
 
 CONTAINER_NAME="dind-bake-$$"
 
 echo "==> Starting temporary DinD container from $DIND_IMAGE..."
 docker run --runtime=sysbox-runc -d --name "$CONTAINER_NAME" \
     --entrypoint /bin/sh \
-    -v "$(realpath "$WORKER_TAR")":/tmp/worker.tar:ro \
+    -v "$(realpath "$SANDBOX_TAR")":/tmp/sandbox.tar:ro \
     "$DIND_IMAGE" -c "dockerd > /var/log/dockerd.log 2>&1 & sleep infinity"
 
 trap 'docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true' EXIT
@@ -34,8 +34,8 @@ while ! docker exec "$CONTAINER_NAME" docker info > /dev/null 2>&1; do
 done
 echo "    Inner dockerd ready after ${elapsed}s"
 
-echo "==> Loading worker image..."
-LOAD_OUTPUT=$(docker exec "$CONTAINER_NAME" docker load -i /tmp/worker.tar)
+echo "==> Loading sandbox image..."
+LOAD_OUTPUT=$(docker exec "$CONTAINER_NAME" docker load -i /tmp/sandbox.tar)
 LOADED_IMAGE=$(echo "$LOAD_OUTPUT" | sed -n 's/^Loaded image: //p' | tail -1)
 if [ -z "$LOADED_IMAGE" ]; then
     # Image had no tag — fall back to the image ID
@@ -56,11 +56,11 @@ docker exec "$CONTAINER_NAME" sh -c '
 '
 
 COMMIT_ARGS=(-c 'ENTRYPOINT ["/usr/local/bin/dind-entrypoint.sh"]')
-if [ -n "$WORKER_IMAGE_ID" ]; then
-    COMMIT_ARGS+=(-c "LABEL worker.image.id=$WORKER_IMAGE_ID")
+if [ -n "$SANDBOX_IMAGE_ID" ]; then
+    COMMIT_ARGS+=(-c "LABEL sandbox.image.id=$SANDBOX_IMAGE_ID")
 fi
-if [ -n "$WORKER_REPO_DIGEST" ]; then
-    COMMIT_ARGS+=(-c "LABEL worker.repo.digest=$WORKER_REPO_DIGEST")
+if [ -n "$IRONCLAW_VERSION" ]; then
+    COMMIT_ARGS+=(-c "LABEL ironclaw.version=$IRONCLAW_VERSION")
 fi
 
 echo "==> Committing container as $OUTPUT_TAG..."

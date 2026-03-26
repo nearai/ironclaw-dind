@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Image tag (default: dev)'
+        description: 'Image tag override (leave empty to auto-detect from ironclaw version)'
         required: false
         type: string
-        default: dev
+        default: ''
       base_image:
         description: 'Base worker image'
         required: false
@@ -32,17 +32,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Determine tag
-        id: tag
-        run: |
-          if [[ -n "${{ inputs.tag }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=dev" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Determine base image
         id: base
@@ -73,8 +62,17 @@ jobs:
         run: |
           docker pull "${{ steps.base.outputs.image }}"
           VERSION=$(docker run --rm --entrypoint ironclaw "${{ steps.base.outputs.image }}" --version | awk '{print $2}')
-          echo "ironclaw_version=v${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Detected IronClaw v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Detected IronClaw ${VERSION}"
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [[ -n "${{ inputs.tag }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build DinD image
         run: |
@@ -86,7 +84,7 @@ jobs:
       - name: Build sandbox image and bake
         if: steps.bake.outputs.enabled == 'true'
         run: |
-          IRONCLAW_VERSION="${{ steps.version.outputs.ironclaw_version }}"
+          IRONCLAW_VERSION="v${{ steps.version.outputs.version }}"
 
           echo "==> Cloning ironclaw ${IRONCLAW_VERSION} for sandbox build..."
           rm -rf /tmp/ironclaw-build
@@ -115,8 +113,13 @@ jobs:
 
           rm -f /tmp/sandbox.tar
 
+      - name: Tag latest
+        run: docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.IMAGE_NAME }}:latest
+
       - name: Push
-        run: docker push ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+        run: |
+          docker push ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+          docker push ${{ env.IMAGE_NAME }}:latest
 
       - name: Summary
         run: |
@@ -124,7 +127,8 @@ jobs:
             echo "## ironclaw-dind"
             echo ""
             echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`"
+            echo "- latest: \`${{ env.IMAGE_NAME }}:latest\`"
             echo "- base: \`${{ steps.base.outputs.image }}\`"
-            echo "- ironclaw: \`${{ steps.version.outputs.ironclaw_version }}\`"
+            echo "- ironclaw: \`v${{ steps.version.outputs.version }}\`"
             echo "- baked: \`${{ steps.bake.outputs.enabled }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

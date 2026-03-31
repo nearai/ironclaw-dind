@@ -27,8 +27,18 @@ env:
 
 jobs:
   build:
-    name: Build & Push
+    name: Build & Push (${{ matrix.variant }})
     runs-on: [self-hosted, sysbox]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: stable
+            base_image: nearaidev/ironclaw-nearai-worker:latest
+            extra_tag: latest
+          - variant: dev
+            base_image: nearaidev/ironclaw-nearai-worker:dev
+            extra_tag: dev
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,10 +46,10 @@ jobs:
       - name: Determine base image
         id: base
         run: |
-          if [[ -n "${{ inputs.base_image }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.base_image }}" ]]; then
             echo "image=${{ inputs.base_image }}" >> "$GITHUB_OUTPUT"
           else
-            echo "image=nearaidev/ironclaw-nearai-worker:latest" >> "$GITHUB_OUTPUT"
+            echo "image=${{ matrix.base_image }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Should bake
@@ -113,21 +123,21 @@ jobs:
 
           rm -f /tmp/sandbox.tar
 
-      - name: Tag latest
-        run: docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.IMAGE_NAME }}:latest
+      - name: Tag extra
+        run: docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}
 
       - name: Push
         run: |
           docker push ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-          docker push ${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}
 
       - name: Summary
         run: |
           {
-            echo "## ironclaw-dind"
+            echo "## ironclaw-dind (${{ matrix.variant }})"
             echo ""
             echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`"
-            echo "- latest: \`${{ env.IMAGE_NAME }}:latest\`"
+            echo "- ${{ matrix.extra_tag }}: \`${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}\`"
             echo "- base: \`${{ steps.base.outputs.image }}\`"
             echo "- ironclaw: \`v${{ steps.version.outputs.version }}\`"
             echo "- baked: \`${{ steps.bake.outputs.enabled }}\`"

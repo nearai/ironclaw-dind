@@ -1,0 +1,142 @@
+name: Build Base Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      ironclaw_version:
+        description: 'IronClaw version (default: latest release)'
+        required: false
+        type: string
+      ironclaw_commit:
+        description: 'Build from source at this commit (overrides version)'
+        required: false
+        type: string
+      tag:
+        description: 'Image tag override (default: version number)'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      ironclaw_version:
+        description: 'IronClaw version (default: latest release)'
+        required: false
+        type: string
+      tag:
+        description: 'Image tag override'
+        required: false
+        type: string
+    outputs:
+      image:
+        description: 'Full image reference (registry/repo:tag)'
+        value: ${{ jobs.build.outputs.image }}
+      version:
+        description: 'Resolved IronClaw version'
+        value: ${{ jobs.build.outputs.version }}
+
+env:
+  IMAGE_NAME: nearaidev/ironclaw-nearai-worker
+
+jobs:
+  build:
+    name: Build Base Worker
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Validate inputs
+        if: inputs.ironclaw_commit && inputs.ironclaw_version
+        run: |
+          echo "::error::Cannot specify both ironclaw_commit and ironclaw_version"
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve IronClaw version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.ironclaw_version }}
+          INPUT_COMMIT: ${{ inputs.ironclaw_commit }}
+        run: |
+          if [[ -n "$INPUT_COMMIT" ]]; then
+            echo "version=dev" >> "$GITHUB_OUTPUT"
+            echo "Building from source commit: $INPUT_COMMIT"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "Using specified version: $INPUT_VERSION"
+          else
+            # Fetch latest release version from GitHub API
+            VERSION=$(curl -fsSL https://api.github.com/repos/nearai/ironclaw/releases/latest \
+              | jq -r '.tag_name' | sed 's/^ironclaw-v//;s/^v//')
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "Resolved latest version: $VERSION"
+          fi
+
+      - name: Clone and build IronClaw from source
+        if: inputs.ironclaw_commit
+        env:
+          IRONCLAW_COMMIT: ${{ inputs.ironclaw_commit }}
+        run: |
+          if ! [[ "$IRONCLAW_COMMIT" =~ ^[0-9A-Za-z._/-]+$ ]]; then
+            echo "::error::Invalid ironclaw_commit value"
+            exit 1
+          fi
+          git clone --filter=blob:none https://github.com/nearai/ironclaw.git /tmp/ironclaw-src
+          cd /tmp/ironclaw-src
+          git checkout "$IRONCLAW_COMMIT"
+          echo "Checked out ironclaw at $(git rev-parse HEAD)"
+
+          # Extract version from Cargo.toml
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$CARGO_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Source version: $CARGO_VERSION"
+
+          # Build in a Bookworm container for GLIBC compatibility
+          docker run --rm \
+            -v /tmp/ironclaw-src:/src \
+            -v "${{ github.workspace }}/base:/out" \
+            -w /src \
+            rust:bookworm \
+            sh -c "cargo build --release --locked && cp target/release/ironclaw /out/ironclaw"
+          echo "Built ironclaw binary successfully"
+
+      - name: Determine image tag
+        id: meta
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="$VERSION"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "image=${{ env.IMAGE_NAME }}:${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: base
+          file: base/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.image }}
+          build-args: |
+            IRONCLAW_VERSION=${{ steps.version.outputs.version }}
+
+      - name: Summary
+        run: |
+          {
+            echo "## ironclaw-nearai-worker"
+            echo ""
+            echo "- image: \`${{ steps.meta.outputs.image }}\`"
+            echo "- ironclaw: \`${{ steps.version.outputs.version }}\`"
+            if [[ -n "${{ inputs.ironclaw_commit }}" ]]; then
+              echo "- source: \`${{ inputs.ironclaw_commit }}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

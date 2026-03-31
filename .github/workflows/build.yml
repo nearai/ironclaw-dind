@@ -9,7 +9,7 @@ on:
         type: string
         default: ''
       base_image:
-        description: 'Base worker image'
+        description: 'Base worker image (ignored when build_base is true)'
         required: false
         type: string
         default: nearaidev/ironclaw-nearai-worker:latest
@@ -18,6 +18,15 @@ on:
         required: false
         type: boolean
         default: true
+      build_base:
+        description: 'Build base worker image from scratch (instead of pulling from Docker Hub)'
+        required: false
+        type: boolean
+        default: false
+      ironclaw_version:
+        description: 'IronClaw version for base build (default: latest release)'
+        required: false
+        type: string
   push:
     branches: [main]
     tags: ["v*"]
@@ -26,8 +35,29 @@ env:
   IMAGE_NAME: nearaidev/ironclaw-dind
 
 jobs:
+  # Optional: build the base worker image from scratch
+  build-base-stable:
+    if: inputs.build_base == true
+    name: Build Base (stable)
+    uses: ./.github/workflows/build-base.yml
+    with:
+      ironclaw_version: ${{ inputs.ironclaw_version }}
+      tag: latest
+    secrets: inherit
+
+  build-base-dev:
+    if: inputs.build_base == true
+    name: Build Base (dev)
+    uses: ./.github/workflows/build-base.yml
+    with:
+      ironclaw_version: ${{ inputs.ironclaw_version }}
+      tag: dev
+    secrets: inherit
+
   build:
     name: Build & Push (${{ matrix.variant }})
+    needs: [build-base-stable, build-base-dev]
+    if: always() && !failure() && !cancelled()
     runs-on: [self-hosted, sysbox]
     strategy:
       fail-fast: false
@@ -46,7 +76,7 @@ jobs:
       - name: Determine base image
         id: base
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.base_image }}" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.build_base }}" != "true" && -n "${{ inputs.base_image }}" ]]; then
             echo "image=${{ inputs.base_image }}" >> "$GITHUB_OUTPUT"
           else
             echo "image=${{ matrix.base_image }}" >> "$GITHUB_OUTPUT"

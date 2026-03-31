@@ -94,12 +94,19 @@ jobs:
       - name: Build sandbox image and bake
         if: steps.bake.outputs.enabled == 'true'
         run: |
-          IRONCLAW_VERSION="v${{ steps.version.outputs.version }}"
+          VERSION="${{ steps.version.outputs.version }}"
 
-          echo "==> Cloning ironclaw ${IRONCLAW_VERSION} for sandbox build..."
+          echo "==> Cloning ironclaw for sandbox build..."
           rm -rf /tmp/ironclaw-build
-          git clone --branch "$IRONCLAW_VERSION" --depth 1 \
-            https://github.com/nearai/ironclaw.git /tmp/ironclaw-build
+          # Try both tag formats: ironclaw-v0.23.0 (new) and v0.21.0 (old)
+          if ! git clone --branch "ironclaw-v${VERSION}" --depth 1 \
+            https://github.com/nearai/ironclaw.git /tmp/ironclaw-build 2>/dev/null; then
+            if ! git clone --branch "v${VERSION}" --depth 1 \
+              https://github.com/nearai/ironclaw.git /tmp/ironclaw-build; then
+              echo "::warning::No tag found for ironclaw ${VERSION} — skipping bake"
+              exit 0
+            fi
+          fi
 
           echo "==> Building sandbox image from Dockerfile.worker..."
           docker build \

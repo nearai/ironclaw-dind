@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Security: Never log, echo, or print the values of these variables:
+# - NEARAI_API_KEY / NEARAI_SESSION_TOKEN
+# - OPENCLAW_GATEWAY_TOKEN
+# - SSH_PUBKEY
+#
+# WARNING: Do not enable debug mode (set -x) as it will expose all variable values.
+
+# Ensure volume mount points are writable by agent
+mkdir -p /home/agent/.ironclaw/channels /home/agent/workspace
+
+# ============================================
+# SSH Server Configuration
+# ============================================
+if [ -n "${SSH_PUBKEY:-}" ]; then
+    echo "Configuring SSH authorized_keys..."
+    mkdir -p /home/agent/.ssh
+    echo "${SSH_PUBKEY}" > /home/agent/.ssh/authorized_keys
+    if [ -n "${BASTION_SSH_PUBKEY:-}" ]; then
+        echo "${BASTION_SSH_PUBKEY}" >> /home/agent/.ssh/authorized_keys
+    fi
+    chmod 755 /home/agent
+    chmod 700 /home/agent/.ssh
+    chmod 600 /home/agent/.ssh/authorized_keys
+    chown -R agent:agent /home/agent/.ssh
+
+    # Generate host key if missing (unique per container)
+    if [ ! -f /home/agent/ssh/ssh_host_ed25519_key ]; then
+        ssh-keygen -t ed25519 -f /home/agent/ssh/ssh_host_ed25519_key -N ""
+        chown agent:agent /home/agent/ssh/ssh_host_ed25519_key*
+    fi
+
+    mkdir -p /run/sshd
+    chmod 0755 /run/sshd
+
+    passwd -d agent 2>/dev/null || usermod -U agent 2>/dev/null || true
+
+    echo "Starting SSH daemon on port 2222..."
+    SSHD_OUTPUT=$(/usr/sbin/sshd -f /dev/null \
+        -o Port=2222 \
+        -o ListenAddress=0.0.0.0 \
+        -o HostKey=/home/agent/ssh/ssh_host_ed25519_key \
+        -o AuthorizedKeysFile=/home/agent/.ssh/authorized_keys \
+        -o PasswordAuthentication=no \
+        -o PermitRootLogin=no \
+        -o PidFile=/home/agent/ssh/sshd.pid \
+        -o StrictModes=yes \
+        -o UsePAM=yes \
+        -o AcceptEnv="LANG LC_*" \
+        -o PrintMotd=no 2>&1) && SSHD_RC=0 || SSHD_RC=$?
+    if [ "$SSHD_RC" -eq 0 ]; then
+        echo "SSH daemon started on port 2222"
+    else
+        echo "Warning: Failed to start SSH daemon (exit code: $SSHD_RC)" >&2
+        echo "SSHD output: $SSHD_OUTPUT" >&2
+    fi
+else
+    echo "Warning: SSH_PUBKEY not set - SSH access will not be available" >&2
+fi
+
+# ============================================
+# IronClaw Configuration (env var mapping)
+# ============================================
+
+# Database: libSQL embedded (no external DB dependency)
+export DATABASE_BACKEND=libsql
+export LIBSQL_PATH=/home/agent/.ironclaw/ironclaw.db
+
+# Gateway: bind to all interfaces on port 18789 (matches compose port mapping)
+export GATEWAY_ENABLED=true
+export GATEWAY_HOST=0.0.0.0
+export GATEWAY_PORT=18789
+export GATEWAY_AUTH_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-changeme}"
+
+# OAuth callback: when OPENCLAW_DOMAIN and instance name are available,
+# configure IronClaw to use the shared auth proxy for OAuth redirects.
+# The auth proxy (auth.DOMAIN) reads the state parameter to route callbacks
+# back to the correct instance (INSTANCE.DOMAIN/oauth/callback).
+if [ -n "${OPENCLAW_DOMAIN:-}" ] && [ -n "${OPENCLAW_INSTANCE_NAME:-}" ]; then
+    export IRONCLAW_OAUTH_CALLBACK_URL="https://auth.${OPENCLAW_DOMAIN}"
+    export IRONCLAW_INSTANCE_NAME="${OPENCLAW_INSTANCE_NAME}"
+fi
+
+# Disable interactive REPL (no TTY in container; would cause immediate shutdown)
+export CLI_ENABLED=false
+
+# Enable Docker sandbox (DinD image has dockerd)
+export SANDBOX_ENABLED=${SANDBOX_ENABLED:-true}
+
+# NEAR AI: map compose-api env vars to IronClaw config
+NEARAI_API_URL="${NEARAI_API_URL:-https://cloud-api.near.ai/v1}"
+# Strip trailing /v1 — IronClaw's NEARAI_BASE_URL is the root (it adds /v1 internally)
+export NEARAI_BASE_URL="${NEARAI_API_URL%/v1}"
+
+# Pass the API key directly (IronClaw auto-selects ChatCompletions mode when NEARAI_API_KEY is set)
+if [ -n "${NEARAI_API_KEY:-}" ]; then
+    export NEARAI_API_KEY="${NEARAI_API_KEY}"
+else
+    echo "Warning: NEARAI_API_KEY not set. IronClaw may not function correctly." >&2
+fi
+
+# Model: default to "auto" for auto-routing (provider is nearai, model is auto)
+export NEARAI_MODEL="${NEARAI_MODEL:-auto}"
+
+# Secrets store: generate-once master key for AES-256-GCM encryption of channel credentials.
+# Persisted on the config volume so it survives container restarts (key and DB are a pair).
+MASTER_KEY_FILE="/home/agent/.ironclaw/.master_key"
+if [ -z "${SECRETS_MASTER_KEY:-}" ]; then
+    if [ -f "$MASTER_KEY_FILE" ]; then
+        SECRETS_MASTER_KEY=$(cat "$MASTER_KEY_FILE")
+    else
+        SECRETS_MASTER_KEY=$(openssl rand -hex 32)
+        echo "$SECRETS_MASTER_KEY" > "$MASTER_KEY_FILE"
+        chmod 600 "$MASTER_KEY_FILE"
+        chown root:root "$MASTER_KEY_FILE"
+    fi
+    export SECRETS_MASTER_KEY
+fi
+
+export RUST_LOG="${RUST_LOG:-ironclaw=info}"
+
+# Workspace: import custom templates from Docker image into DB on first boot.
+# seed_if_empty() fills any remaining gaps with generic defaults.
+export WORKSPACE_IMPORT_DIR=/app/init/workspace
+
+# ============================================
+# Final Ownership Fix
+# ============================================
+chown -R agent:agent /home/agent/.ironclaw /home/agent/workspace
+
+# Lock master key so the agent user (and AI shell tool) cannot read it.
+# The ironclaw process inherits SECRETS_MASTER_KEY via env (scrubbed from AI shell).
+if [ -f "$MASTER_KEY_FILE" ]; then
+    chown root:root "$MASTER_KEY_FILE"
+    chmod 600 "$MASTER_KEY_FILE"
+fi
+
+# ============================================
+# Start IronClaw with auto-restart
+# ============================================
+RESTART_DELAY="${IRONCLAW_RESTART_DELAY:-5}"
+MAX_FAILURES="${IRONCLAW_MAX_FAILURES:-10}"
+FAILURE_COUNT=0
+
+export HOME=/home/agent
+
+while true; do
+    echo "Starting IronClaw..."
+    chown -R agent:agent /home/agent/.ironclaw /home/agent/workspace 2>/dev/null || true
+    # Re-lock master key after chown -R
+    if [ -f "$MASTER_KEY_FILE" ]; then
+        chown root:root "$MASTER_KEY_FILE"
+        chmod 600 "$MASTER_KEY_FILE"
+    fi
+    runuser -p -u agent -- ironclaw run --no-onboard
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -eq 0 ]; then
+        FAILURE_COUNT=0
+    else
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        echo "IronClaw exited with code $EXIT_CODE (failure $FAILURE_COUNT/$MAX_FAILURES)"
+    fi
+    if [ $FAILURE_COUNT -ge $MAX_FAILURES ]; then
+        echo "IronClaw failed $MAX_FAILURES times consecutively. Exiting." >&2
+        exit 1
+    fi
+    echo "Restarting in ${RESTART_DELAY}s..."
+    sleep "$RESTART_DELAY"
+done

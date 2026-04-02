@@ -121,10 +121,6 @@ fi
 
 export RUST_LOG="${RUST_LOG:-ironclaw=info}"
 
-# Workspace: import custom templates from Docker image into DB on first boot.
-# seed_if_empty() fills any remaining gaps with generic defaults.
-export WORKSPACE_IMPORT_DIR=/app/init/workspace
-
 # ============================================
 # Final Ownership Fix
 # ============================================

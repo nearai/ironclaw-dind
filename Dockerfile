@@ -55,9 +55,8 @@ RUN mkdir -p /home/agent/.ssh /home/agent/ssh /home/agent/.ironclaw/channels /ho
 # subagent containers. Create a symlink so both paths resolve to the same place.
 RUN ln -s /home/agent/workspace /workspace
 
-# Copy entrypoint and workspace bootstrap files
+# Copy entrypoint
 COPY entrypoint.sh /app/entrypoint.sh
-COPY workspace/ /app/init/workspace/
 RUN chmod +x /app/entrypoint.sh
 
 COPY dind-entrypoint.sh /usr/local/bin/dind-entrypoint.sh

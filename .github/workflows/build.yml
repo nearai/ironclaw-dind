@@ -13,11 +13,6 @@ on:
         required: false
         type: string
         default: nearaidev/ironclaw:latest
-      bake:
-        description: 'Bake sandbox image into inner Docker'
-        required: false
-        type: boolean
-        default: true
   push:
     branches: [main]
     tags: ["v*"]
@@ -53,15 +48,6 @@ jobs:
             echo "image=${{ inputs.ironclaw_image }}" >> "$GITHUB_OUTPUT"
           else
             echo "image=${{ matrix.ironclaw_image }}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Should bake
-        id: bake
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "enabled=${{ inputs.bake }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Log in to Docker Hub
@@ -122,45 +108,6 @@ jobs:
             -t ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} \
             .
 
-      - name: Build sandbox image and bake
-        if: steps.check.outputs.skip != 'true' && steps.bake.outputs.enabled == 'true'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          echo "==> Cloning ironclaw for sandbox build..."
-          rm -rf /tmp/ironclaw-build
-          # Try both tag formats: ironclaw-v0.23.0 (new) and v0.21.0 (old)
-          if ! git clone --branch "ironclaw-v${VERSION}" --depth 1 \
-            https://github.com/nearai/ironclaw.git /tmp/ironclaw-build 2>/dev/null; then
-            if ! git clone --branch "v${VERSION}" --depth 1 \
-              https://github.com/nearai/ironclaw.git /tmp/ironclaw-build; then
-              echo "::warning::No tag found for ironclaw ${VERSION} — skipping bake"
-              exit 0
-            fi
-          fi
-
-          echo "==> Building sandbox image from Dockerfile.worker..."
-          docker build --no-cache \
-            -f /tmp/ironclaw-build/Dockerfile.worker \
-            -t ironclaw-sandbox:local \
-            /tmp/ironclaw-build
-          rm -rf /tmp/ironclaw-build
-
-          echo "==> Saving sandbox tarball..."
-          docker save ironclaw-sandbox:local -o /tmp/sandbox.tar
-
-          SANDBOX_IMAGE_ID=$(docker inspect --format='{{.Id}}' ironclaw-sandbox:local)
-
-          echo "==> Running bake script (sysbox)..."
-          bash scripts/bake-inner-image.sh \
-            "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" \
-            /tmp/sandbox.tar \
-            "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" \
-            "$SANDBOX_IMAGE_ID" \
-            "v${VERSION}"
-
-          rm -f /tmp/sandbox.tar
-
       - name: Tag extra
         if: steps.check.outputs.skip != 'true'
         run: docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}
@@ -181,7 +128,6 @@ jobs:
             echo "- ${{ matrix.extra_tag }}: \`${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}\`"
             echo "- ironclaw: \`${{ steps.ironclaw.outputs.image }}\` (v${{ steps.version.outputs.version }})"
             echo "- source digest: \`${{ steps.digest.outputs.upstream }}\`"
-            echo "- baked: \`${{ steps.bake.outputs.enabled }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summary (skipped)

@@ -1,15 +1,15 @@
 # IronClaw Docker-in-Docker Worker
 
-Docker-in-Docker build of [nearai/openclaw-nearai-worker](https://github.com/nearai/openclaw-nearai-worker)'s worker image. Adds `dockerd` so IronClaw can run sandboxed workloads in nested containers, and pre-bakes the sandbox image into the inner Docker storage so it's available immediately without pulling.
+Docker-in-Docker agent image built on [nearaidev/ironclaw](https://hub.docker.com/r/nearaidev/ironclaw). Adds SSH, `dockerd`, dev tools, and a worker entrypoint so IronClaw can run sandboxed workloads in nested containers. The sandbox image is pre-baked into the inner Docker storage so it's available immediately without pulling.
 
 ## Architecture
 
 The DinD image contains two layers:
 
-- **Outer image** — the `openclaw-nearai-worker` image plus `dockerd`. Runs the full worker entrypoint (SSH, secrets, IronClaw orchestrator).
+- **Outer image** — the `nearaidev/ironclaw` binary plus SSH, Docker daemon, and dev tools. Runs the full worker entrypoint (SSH, secrets, IronClaw orchestrator).
 - **Inner image** — the sandbox image built from [nearai/ironclaw](https://github.com/nearai/ironclaw)'s `Dockerfile.worker`. Has `ENTRYPOINT ["ironclaw"]` and runs in worker/claude-bridge mode when the orchestrator spawns a job container. Pre-baked into the outer image's inner Docker storage as `ironclaw-worker:latest`.
 
-These are **different images** from **different repos**. The outer image manages the full worker lifecycle; the inner image is a minimal sandbox that receives commands from the orchestrator.
+These are **different images**. The outer image manages the full worker lifecycle; the inner image is a minimal sandbox that receives commands from the orchestrator.
 
 ## Requirements
 
@@ -25,21 +25,21 @@ sudo systemctl restart docker
 
 1. Set the upstream image and output tag:
    ```bash
-   export UPSTREAM_IMAGE=nearaidev/ironclaw-nearai-worker:dev
+   export IRONCLAW_IMAGE=nearaidev/ironclaw:dev
    export DIND_IMAGE=ghcr.io/near-one/ironclaw-dind:dev
    ```
 
-2. Pull the upstream worker image and detect the ironclaw version:
+2. Pull the upstream ironclaw image and detect the version:
    ```bash
-   docker pull "$UPSTREAM_IMAGE"
-   export IRONCLAW_VERSION=v$(docker run --rm --entrypoint ironclaw "$UPSTREAM_IMAGE" --version | awk '{print $2}')
+   docker pull "$IRONCLAW_IMAGE"
+   export IRONCLAW_VERSION=v$(docker run --rm "$IRONCLAW_IMAGE" --version | awk '{print $2}')
    echo "Detected IronClaw $IRONCLAW_VERSION"
    ```
 
 3. Build the DinD wrapper image:
    ```bash
    docker build \
-     --build-arg BASE_IMAGE="$UPSTREAM_IMAGE" \
+     --build-arg IRONCLAW_IMAGE="$IRONCLAW_IMAGE" \
      -t dind-base:local \
      .
    ```

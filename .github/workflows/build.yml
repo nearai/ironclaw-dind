@@ -8,11 +8,11 @@ on:
         required: false
         type: string
         default: ''
-      base_image:
-        description: 'Base worker image'
+      ironclaw_image:
+        description: 'Source ironclaw image (for binary)'
         required: false
         type: string
-        default: nearaidev/ironclaw-nearai-worker:latest
+        default: nearaidev/ironclaw:latest
       bake:
         description: 'Bake sandbox image into inner Docker'
         required: false
@@ -21,6 +21,9 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+  schedule:
+    # Check for upstream changes every 6 hours
+    - cron: '0 */6 * * *'
 
 env:
   IMAGE_NAME: nearaidev/ironclaw-dind
@@ -34,22 +37,22 @@ jobs:
       matrix:
         include:
           - variant: stable
-            base_image: nearaidev/ironclaw-nearai-worker:latest
+            ironclaw_image: nearaidev/ironclaw:latest
             extra_tag: latest
           - variant: dev
-            base_image: nearaidev/ironclaw-nearai-worker:dev
+            ironclaw_image: nearaidev/ironclaw:dev
             extra_tag: dev
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Determine base image
-        id: base
+      - name: Determine ironclaw image
+        id: ironclaw
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.base_image }}" ]]; then
-            echo "image=${{ inputs.base_image }}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.ironclaw_image }}" ]]; then
+            echo "image=${{ inputs.ironclaw_image }}" >> "$GITHUB_OUTPUT"
           else
-            echo "image=${{ matrix.base_image }}" >> "$GITHUB_OUTPUT"
+            echo "image=${{ matrix.ironclaw_image }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Should bake
@@ -67,16 +70,42 @@ jobs:
           username: ${{ vars.DOCKER_REGISTRY_USER }}
           password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
 
-      - name: Pull base image and detect ironclaw version
+      - name: Pull ironclaw image and detect version
         id: version
         run: |
-          docker pull "${{ steps.base.outputs.image }}"
-          VERSION=$(docker run --rm --entrypoint ironclaw "${{ steps.base.outputs.image }}" --version | awk '{print $2}')
+          docker pull "${{ steps.ironclaw.outputs.image }}"
+          VERSION=$(docker run --rm "${{ steps.ironclaw.outputs.image }}" --version | awk '{print $2}')
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Detected IronClaw ${VERSION}"
 
+      - name: Get upstream digest
+        id: digest
+        run: |
+          UPSTREAM_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${{ steps.ironclaw.outputs.image }}" | cut -d@ -f2)
+          echo "upstream=$UPSTREAM_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Upstream digest: $UPSTREAM_DIGEST"
+
+      - name: Check if rebuild needed (schedule only)
+        id: check
+        if: github.event_name == 'schedule'
+        run: |
+          CURRENT_DIGEST=""
+          if docker pull "${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}" > /dev/null 2>&1; then
+            CURRENT_DIGEST=$(docker inspect --format='{{index .Config.Labels "ironclaw.source.digest"}}' "${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}" 2>/dev/null || echo "")
+          fi
+          echo "Current source digest: ${CURRENT_DIGEST:-<none>}"
+          echo "Upstream digest: ${{ steps.digest.outputs.upstream }}"
+          if [[ "$CURRENT_DIGEST" == "${{ steps.digest.outputs.upstream }}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No changes detected — skipping rebuild"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream changed — rebuilding"
+          fi
+
       - name: Determine tag
         id: tag
+        if: steps.check.outputs.skip != 'true'
         run: |
           if [[ -n "${{ inputs.tag }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
@@ -85,14 +114,16 @@ jobs:
           fi
 
       - name: Build DinD image
+        if: steps.check.outputs.skip != 'true'
         run: |
           docker build \
-            --build-arg BASE_IMAGE=${{ steps.base.outputs.image }} \
+            --build-arg IRONCLAW_IMAGE=${{ steps.ironclaw.outputs.image }} \
+            --build-arg IRONCLAW_SOURCE_DIGEST=${{ steps.digest.outputs.upstream }} \
             -t ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} \
             .
 
       - name: Build sandbox image and bake
-        if: steps.bake.outputs.enabled == 'true'
+        if: steps.check.outputs.skip != 'true' && steps.bake.outputs.enabled == 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
@@ -126,26 +157,38 @@ jobs:
             /tmp/sandbox.tar \
             "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" \
             "$SANDBOX_IMAGE_ID" \
-            "$IRONCLAW_VERSION"
+            "v${VERSION}"
 
           rm -f /tmp/sandbox.tar
 
       - name: Tag extra
+        if: steps.check.outputs.skip != 'true'
         run: docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}
 
       - name: Push
+        if: steps.check.outputs.skip != 'true'
         run: |
           docker push ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
           docker push ${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}
 
       - name: Summary
+        if: steps.check.outputs.skip != 'true'
         run: |
           {
             echo "## ironclaw-dind (${{ matrix.variant }})"
             echo ""
             echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`"
             echo "- ${{ matrix.extra_tag }}: \`${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}\`"
-            echo "- base: \`${{ steps.base.outputs.image }}\`"
-            echo "- ironclaw: \`v${{ steps.version.outputs.version }}\`"
+            echo "- ironclaw: \`${{ steps.ironclaw.outputs.image }}\` (v${{ steps.version.outputs.version }})"
+            echo "- source digest: \`${{ steps.digest.outputs.upstream }}\`"
             echo "- baked: \`${{ steps.bake.outputs.enabled }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary (skipped)
+        if: steps.check.outputs.skip == 'true'
+        run: |
+          {
+            echo "## ironclaw-dind (${{ matrix.variant }}) — skipped"
+            echo ""
+            echo "Upstream \`${{ steps.ironclaw.outputs.image }}\` digest unchanged."
           } >> "$GITHUB_STEP_SUMMARY"

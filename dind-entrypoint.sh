@@ -17,4 +17,13 @@ while ! docker info > /dev/null 2>&1; do
 done
 echo "Docker daemon ready after ${elapsed}s"
 
+# Pre-pull the sandbox worker image in the background so ironclaw starts immediately.
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"
+(
+    if ! docker image inspect "$SANDBOX_IMAGE" > /dev/null 2>&1; then
+        echo "Pulling sandbox image ${SANDBOX_IMAGE} in background..."
+        docker pull "$SANDBOX_IMAGE" && echo "Sandbox image ready" || echo "WARNING: Failed to pull ${SANDBOX_IMAGE}" >&2
+    fi
+) &
+
 exec ironclaw "$@"

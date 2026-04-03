@@ -5,13 +5,9 @@ Thin wrapper on [nearaidev/ironclaw](https://hub.docker.com/r/nearaidev/ironclaw
 ## What it adds
 
 - `docker.io` + `iptables` packages
-- A DinD entrypoint that starts `dockerd`, waits for it, then execs `ironclaw`
+- A DinD entrypoint that starts `dockerd`, pre-pulls `nearaidev/ironclaw-worker` in the background, then execs `ironclaw`
 
 Everything else (the ironclaw binary, runtime, user) comes from the base image.
-
-## Sandbox bake
-
-CI also pre-bakes the sandbox image (from `Dockerfile.worker` in the ironclaw repo) into the inner Docker storage so it's available immediately without pulling. See `scripts/bake-inner-image.sh`.
 
 ## Build
 

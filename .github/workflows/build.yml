@@ -122,29 +122,18 @@ jobs:
             -t ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} \
             .
 
-      - name: Build sandbox image and bake
+      - name: Bake sandbox image
         if: steps.check.outputs.skip != 'true' && steps.bake.outputs.enabled == 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
+          WORKER_IMAGE="nearaidev/ironclaw-worker:${{ matrix.extra_tag }}"
 
-          echo "==> Cloning ironclaw for sandbox build..."
-          rm -rf /tmp/ironclaw-build
-          # Try both tag formats: ironclaw-v0.23.0 (new) and v0.21.0 (old)
-          if ! git clone --branch "ironclaw-v${VERSION}" --depth 1 \
-            https://github.com/nearai/ironclaw.git /tmp/ironclaw-build 2>/dev/null; then
-            if ! git clone --branch "v${VERSION}" --depth 1 \
-              https://github.com/nearai/ironclaw.git /tmp/ironclaw-build; then
-              echo "::warning::No tag found for ironclaw ${VERSION} — skipping bake"
-              exit 0
-            fi
+          echo "==> Pulling worker image ${WORKER_IMAGE}..."
+          if ! docker pull "$WORKER_IMAGE"; then
+            echo "::warning::Worker image ${WORKER_IMAGE} not found — skipping bake"
+            exit 0
           fi
-
-          echo "==> Building sandbox image from Dockerfile.worker..."
-          docker build --no-cache \
-            -f /tmp/ironclaw-build/Dockerfile.worker \
-            -t ironclaw-sandbox:local \
-            /tmp/ironclaw-build
-          rm -rf /tmp/ironclaw-build
+          docker tag "$WORKER_IMAGE" ironclaw-sandbox:local
 
           echo "==> Saving sandbox tarball..."
           docker save ironclaw-sandbox:local -o /tmp/sandbox.tar

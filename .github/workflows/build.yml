@@ -157,7 +157,7 @@ jobs:
             /tmp/sandbox.tar \
             "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" \
             "$SANDBOX_IMAGE_ID" \
-            "$IRONCLAW_VERSION"
+            "v${VERSION}"
 
           rm -f /tmp/sandbox.tar
 

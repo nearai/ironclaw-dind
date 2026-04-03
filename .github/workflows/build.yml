@@ -39,9 +39,9 @@ jobs:
           - variant: stable
             ironclaw_image: nearaidev/ironclaw:latest
             extra_tag: latest
-          - variant: dev
-            ironclaw_image: nearaidev/ironclaw:dev
-            extra_tag: dev
+          - variant: staging
+            ironclaw_image: nearaidev/ironclaw:staging
+            extra_tag: staging
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -140,7 +140,7 @@ jobs:
           fi
 
           echo "==> Building sandbox image from Dockerfile.worker..."
-          docker build \
+          docker build --no-cache \
             -f /tmp/ironclaw-build/Dockerfile.worker \
             -t ironclaw-sandbox:local \
             /tmp/ironclaw-build

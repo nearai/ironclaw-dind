@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start Docker daemon in the background.
-# The worker entrypoint (/app/entrypoint.sh) handles everything else:
-# SSH setup, IronClaw configuration, user switching, and the main process loop.
+# Start Docker daemon, then hand off to the base image entrypoint (ironclaw).
 
-echo "Starting Docker daemon..."
 dockerd > /var/log/dockerd.log 2>&1 &
 
 elapsed=0
@@ -20,4 +17,4 @@ while ! docker info > /dev/null 2>&1; do
 done
 echo "Docker daemon ready after ${elapsed}s"
 
-exec /app/entrypoint.sh "$@"
+exec ironclaw "$@"

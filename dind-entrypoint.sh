@@ -5,7 +5,7 @@ set -euo pipefail
 # Mirrors the old openclaw-nearai-worker entrypoint behavior: SSH as a
 # non-root user, ironclaw runs under that same user via runuser.
 
-IRONCLAW_USER="ironclaw"
+IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
 IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" | cut -d: -f6)"
 if [ -z "${IRONCLAW_HOME}" ]; then
     echo "ERROR: Unable to resolve home directory for user '${IRONCLAW_USER}'" >&2

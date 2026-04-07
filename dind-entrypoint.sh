@@ -80,9 +80,8 @@ SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"
 # ============================================
 # OAuth callback (if domain and instance name are available)
 # ============================================
-if [ -n "${OPENCLAW_DOMAIN:-}" ] && [ -n "${OPENCLAW_INSTANCE_NAME:-}" ]; then
-    export IRONCLAW_OAUTH_CALLBACK_URL="https://auth.${OPENCLAW_DOMAIN}"
-    export IRONCLAW_INSTANCE_NAME="${OPENCLAW_INSTANCE_NAME}"
+if [ -n "${IRONCLAW_DOMAIN:-}" ] && [ -n "${IRONCLAW_INSTANCE_NAME:-}" ]; then
+    export IRONCLAW_OAUTH_CALLBACK_URL="https://auth.${IRONCLAW_DOMAIN}"
 fi
 
 # ============================================

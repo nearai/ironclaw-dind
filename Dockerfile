@@ -2,7 +2,7 @@
 # sandboxed workloads in nested containers (requires Sysbox or --privileged).
 
 ARG IRONCLAW_IMAGE=nearaidev/ironclaw:latest
-FROM docker:28-dind AS docker-bin
+FROM docker:27-dind AS docker-bin
 
 FROM ${IRONCLAW_IMAGE}
 

@@ -65,8 +65,11 @@ while ! docker info > /dev/null 2>&1; do
 done
 echo "Docker daemon ready after ${elapsed}s"
 
-# Add ironclaw user to the docker group so it can use the daemon
+# Let non-root user access the Docker daemon.
+# usermod -aG docker doesn't take effect under runuser -p (no new login session),
+# so we also open the socket directly.
 usermod -aG docker "${IRONCLAW_USER}" 2>/dev/null || true
+chmod 666 /var/run/docker.sock 2>/dev/null || true
 
 # Pre-pull the sandbox worker image in the background so ironclaw starts immediately.
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"

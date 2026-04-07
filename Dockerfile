@@ -17,7 +17,7 @@ COPY --from=docker-bin /usr/local/bin/runc /usr/local/bin/runc
 COPY --from=docker-bin /usr/local/bin/docker-proxy /usr/local/bin/docker-proxy
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends iptables \
+    && apt-get install -y --no-install-recommends iptables openssh-server \
     && rm -rf /var/lib/apt/lists/*
 
 COPY dind-entrypoint.sh /usr/local/bin/dind-entrypoint.sh

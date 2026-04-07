@@ -1,8 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start Docker daemon, then hand off to the base image entrypoint (ironclaw).
+# Start Docker daemon and SSH server, then hand off to ironclaw.
 
+# ============================================
+# SSH Server
+# ============================================
+if [ -n "${SSH_PUBKEY:-}" ]; then
+    echo "Configuring SSH..."
+    SSH_USER="${SSH_USER:-root}"
+    SSH_HOME=$(eval echo "~${SSH_USER}")
+
+    mkdir -p "${SSH_HOME}/.ssh"
+    echo "${SSH_PUBKEY}" > "${SSH_HOME}/.ssh/authorized_keys"
+    if [ -n "${BASTION_SSH_PUBKEY:-}" ]; then
+        echo "${BASTION_SSH_PUBKEY}" >> "${SSH_HOME}/.ssh/authorized_keys"
+    fi
+    chmod 700 "${SSH_HOME}/.ssh"
+    chmod 600 "${SSH_HOME}/.ssh/authorized_keys"
+    chown -R "${SSH_USER}:${SSH_USER}" "${SSH_HOME}/.ssh" 2>/dev/null || true
+
+    # Generate host key if missing
+    mkdir -p /etc/ssh
+    if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
+        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
+    fi
+
+    mkdir -p /run/sshd
+    /usr/sbin/sshd -p 2222 -o PasswordAuthentication=no -o PrintMotd=no \
+        && echo "SSH daemon started on port 2222" \
+        || echo "WARNING: Failed to start SSH daemon" >&2
+else
+    echo "SSH_PUBKEY not set — SSH access disabled"
+fi
+
+# ============================================
+# Docker Daemon
+# ============================================
 dockerd > /var/log/dockerd.log 2>&1 &
 
 elapsed=0

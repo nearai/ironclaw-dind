@@ -1,35 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start Docker daemon and SSH server, then hand off to ironclaw.
+# Start Docker daemon and SSH server, then hand off to ironclaw as non-root.
+# Mirrors the old openclaw-nearai-worker entrypoint behavior: SSH as a
+# non-root user, ironclaw runs under that same user via runuser.
+
+IRONCLAW_USER="ironclaw"
+IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" | cut -d: -f6)"
+if [ -z "${IRONCLAW_HOME}" ]; then
+    echo "ERROR: Unable to resolve home directory for user '${IRONCLAW_USER}'" >&2
+    exit 1
+fi
 
 # ============================================
-# SSH Server
+# SSH Server (non-root, port 2222)
 # ============================================
 if [ -n "${SSH_PUBKEY:-}" ]; then
     echo "Configuring SSH..."
-    SSH_USER="${SSH_USER:-root}"
-    SSH_HOME="$(getent passwd "${SSH_USER}" | cut -d: -f6)"
-    if [ -z "${SSH_HOME}" ]; then
-        echo "ERROR: Unable to resolve home directory for SSH user '${SSH_USER}'" >&2
-        exit 1
-    fi
-
-    mkdir -p "${SSH_HOME}/.ssh"
-    echo "${SSH_PUBKEY}" > "${SSH_HOME}/.ssh/authorized_keys"
+    mkdir -p "${IRONCLAW_HOME}/.ssh"
+    echo "${SSH_PUBKEY}" > "${IRONCLAW_HOME}/.ssh/authorized_keys"
     if [ -n "${BASTION_SSH_PUBKEY:-}" ]; then
-        echo "${BASTION_SSH_PUBKEY}" >> "${SSH_HOME}/.ssh/authorized_keys"
+        echo "${BASTION_SSH_PUBKEY}" >> "${IRONCLAW_HOME}/.ssh/authorized_keys"
     fi
-    chmod 700 "${SSH_HOME}/.ssh"
-    chmod 600 "${SSH_HOME}/.ssh/authorized_keys"
-    chown -R "${SSH_USER}:${SSH_USER}" "${SSH_HOME}/.ssh"
+    chmod 755 "${IRONCLAW_HOME}"
+    chmod 700 "${IRONCLAW_HOME}/.ssh"
+    chmod 600 "${IRONCLAW_HOME}/.ssh/authorized_keys"
+    chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ssh"
 
     # Generate any missing host keys
     mkdir -p /etc/ssh
     ssh-keygen -A
 
+    # Unlock the user for SSH key-based login
+    passwd -d "${IRONCLAW_USER}" 2>/dev/null || usermod -U "${IRONCLAW_USER}" 2>/dev/null || true
+
     mkdir -p /run/sshd
-    if ! /usr/sbin/sshd -p 2222 -o PasswordAuthentication=no -o PrintMotd=no; then
+    if ! /usr/sbin/sshd -p 2222 \
+        -o PasswordAuthentication=no \
+        -o PermitRootLogin=no \
+        -o PrintMotd=no \
+        -o PidFile=/run/sshd/sshd.pid; then
         echo "ERROR: Failed to start SSH daemon" >&2
         exit 1
     fi
@@ -55,6 +65,9 @@ while ! docker info > /dev/null 2>&1; do
 done
 echo "Docker daemon ready after ${elapsed}s"
 
+# Add ironclaw user to the docker group so it can use the daemon
+usermod -aG docker "${IRONCLAW_USER}" 2>/dev/null || true
+
 # Pre-pull the sandbox worker image in the background so ironclaw starts immediately.
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"
 (
@@ -64,4 +77,10 @@ SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"
     fi
 ) &
 
-exec ironclaw "$@"
+# ============================================
+# Ensure writable dirs and drop to non-root
+# ============================================
+mkdir -p "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
+chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
+
+exec runuser -p -u "${IRONCLAW_USER}" -- ironclaw "$@"

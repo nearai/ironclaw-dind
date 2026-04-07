@@ -72,12 +72,14 @@ usermod -aG docker "${IRONCLAW_USER}" 2>/dev/null || true
 chmod 666 /var/run/docker.sock 2>/dev/null || true
 
 # Pre-pull the sandbox worker image in the background so ironclaw starts immediately.
+# Also tag as short name — ironclaw internally references "ironclaw-worker:latest".
 SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"
 (
     if ! docker image inspect "$SANDBOX_IMAGE" > /dev/null 2>&1; then
         echo "Pulling sandbox image ${SANDBOX_IMAGE} in background..."
         docker pull "$SANDBOX_IMAGE" && echo "Sandbox image ready" || echo "WARNING: Failed to pull ${SANDBOX_IMAGE}" >&2
     fi
+    docker tag "$SANDBOX_IMAGE" ironclaw-worker:latest 2>/dev/null || true
 ) &
 
 # ============================================

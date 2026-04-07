@@ -78,9 +78,68 @@ SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"
 ) &
 
 # ============================================
-# Ensure writable dirs and drop to non-root
+# Secrets master key (generate-once, root-locked)
 # ============================================
-mkdir -p "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
-chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
+MASTER_KEY_FILE="${IRONCLAW_HOME}/.ironclaw/.master_key"
+mkdir -p "${IRONCLAW_HOME}/.ironclaw/channels" "${IRONCLAW_HOME}/workspace"
+if [ -z "${SECRETS_MASTER_KEY:-}" ]; then
+    if [ -f "$MASTER_KEY_FILE" ]; then
+        SECRETS_MASTER_KEY=$(cat "$MASTER_KEY_FILE")
+    else
+        SECRETS_MASTER_KEY=$(openssl rand -hex 32)
+        echo "$SECRETS_MASTER_KEY" > "$MASTER_KEY_FILE"
+    fi
+    export SECRETS_MASTER_KEY
+fi
 
-exec runuser -p -u "${IRONCLAW_USER}" -- ironclaw "$@"
+# ============================================
+# OAuth callback (if domain and instance name are available)
+# ============================================
+if [ -n "${OPENCLAW_DOMAIN:-}" ] && [ -n "${OPENCLAW_INSTANCE_NAME:-}" ]; then
+    export IRONCLAW_OAUTH_CALLBACK_URL="https://auth.${OPENCLAW_DOMAIN}"
+    export IRONCLAW_INSTANCE_NAME="${OPENCLAW_INSTANCE_NAME}"
+fi
+
+# ============================================
+# Ownership fix and master key lock
+# ============================================
+chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
+# Lock master key so the ironclaw user (and AI shell tool) cannot read it.
+# The process inherits SECRETS_MASTER_KEY via env.
+if [ -f "$MASTER_KEY_FILE" ]; then
+    chown root:root "$MASTER_KEY_FILE"
+    chmod 600 "$MASTER_KEY_FILE"
+fi
+
+# ============================================
+# Start IronClaw with auto-restart
+# ============================================
+RESTART_DELAY="${IRONCLAW_RESTART_DELAY:-5}"
+MAX_FAILURES="${IRONCLAW_MAX_FAILURES:-10}"
+FAILURE_COUNT=0
+
+export HOME="${IRONCLAW_HOME}"
+
+while true; do
+    echo "Starting IronClaw..."
+    chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace" 2>/dev/null || true
+    # Re-lock master key after chown -R
+    if [ -f "$MASTER_KEY_FILE" ]; then
+        chown root:root "$MASTER_KEY_FILE"
+        chmod 600 "$MASTER_KEY_FILE"
+    fi
+    runuser -p -u "${IRONCLAW_USER}" -- ironclaw run --no-onboard "$@"
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -eq 0 ]; then
+        FAILURE_COUNT=0
+    else
+        FAILURE_COUNT=$((FAILURE_COUNT + 1))
+        echo "IronClaw exited with code $EXIT_CODE (failure $FAILURE_COUNT/$MAX_FAILURES)"
+    fi
+    if [ $FAILURE_COUNT -ge $MAX_FAILURES ]; then
+        echo "IronClaw failed $MAX_FAILURES times consecutively. Exiting." >&2
+        exit 1
+    fi
+    echo "Restarting in ${RESTART_DELAY}s..."
+    sleep "$RESTART_DELAY"
+done

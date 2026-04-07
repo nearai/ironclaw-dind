@@ -9,7 +9,11 @@ set -euo pipefail
 if [ -n "${SSH_PUBKEY:-}" ]; then
     echo "Configuring SSH..."
     SSH_USER="${SSH_USER:-root}"
-    SSH_HOME=$(eval echo "~${SSH_USER}")
+    SSH_HOME="$(getent passwd "${SSH_USER}" | cut -d: -f6)"
+    if [ -z "${SSH_HOME}" ]; then
+        echo "ERROR: Unable to resolve home directory for SSH user '${SSH_USER}'" >&2
+        exit 1
+    fi
 
     mkdir -p "${SSH_HOME}/.ssh"
     echo "${SSH_PUBKEY}" > "${SSH_HOME}/.ssh/authorized_keys"
@@ -18,18 +22,18 @@ if [ -n "${SSH_PUBKEY:-}" ]; then
     fi
     chmod 700 "${SSH_HOME}/.ssh"
     chmod 600 "${SSH_HOME}/.ssh/authorized_keys"
-    chown -R "${SSH_USER}:${SSH_USER}" "${SSH_HOME}/.ssh" 2>/dev/null || true
+    chown -R "${SSH_USER}:${SSH_USER}" "${SSH_HOME}/.ssh"
 
-    # Generate host key if missing
+    # Generate any missing host keys
     mkdir -p /etc/ssh
-    if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
-        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N ""
-    fi
+    ssh-keygen -A
 
     mkdir -p /run/sshd
-    /usr/sbin/sshd -p 2222 -o PasswordAuthentication=no -o PrintMotd=no \
-        && echo "SSH daemon started on port 2222" \
-        || echo "WARNING: Failed to start SSH daemon" >&2
+    if ! /usr/sbin/sshd -p 2222 -o PasswordAuthentication=no -o PrintMotd=no; then
+        echo "ERROR: Failed to start SSH daemon" >&2
+        exit 1
+    fi
+    echo "SSH daemon started on port 2222"
 else
     echo "SSH_PUBKEY not set — SSH access disabled"
 fi

@@ -18,6 +18,7 @@ COPY --from=docker-bin /usr/local/bin/docker-proxy /usr/local/bin/docker-proxy
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends iptables openssh-server \
+    && rm -f /etc/ssh/ssh_host_* \
     && rm -rf /var/lib/apt/lists/*
 
 COPY dind-entrypoint.sh /usr/local/bin/dind-entrypoint.sh

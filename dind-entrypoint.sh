@@ -6,7 +6,7 @@ set -euo pipefail
 # non-root user, ironclaw runs under that same user via runuser.
 
 IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
-IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" | cut -d: -f6)"
+IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" 2>/dev/null | cut -d: -f6 || true)"
 if [ -z "${IRONCLAW_HOME}" ]; then
     echo "ERROR: Unable to resolve home directory for user '${IRONCLAW_USER}'" >&2
     exit 1
@@ -31,8 +31,8 @@ if [ -n "${SSH_PUBKEY:-}" ]; then
     mkdir -p /etc/ssh
     ssh-keygen -A
 
-    # Unlock the user for SSH key-based login
-    passwd -d "${IRONCLAW_USER}" 2>/dev/null || usermod -U "${IRONCLAW_USER}" 2>/dev/null || true
+    # Unlock the user for SSH key-based login (without deleting password)
+    usermod -U "${IRONCLAW_USER}" 2>/dev/null || passwd -u "${IRONCLAW_USER}" 2>/dev/null || true
 
     mkdir -p /run/sshd
     if ! /usr/sbin/sshd -p 2222 \
@@ -102,8 +102,11 @@ export HOME="${IRONCLAW_HOME}"
 while true; do
     echo "Starting IronClaw..."
     chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace" 2>/dev/null || true
-    runuser -p -u "${IRONCLAW_USER}" -- ironclaw run --no-onboard "$@"
-    EXIT_CODE=$?
+    if [ "$#" -eq 0 ]; then
+        runuser -p -u "${IRONCLAW_USER}" -- ironclaw run --no-onboard && EXIT_CODE=0 || EXIT_CODE=$?
+    else
+        runuser -p -u "${IRONCLAW_USER}" -- ironclaw "$@" && EXIT_CODE=0 || EXIT_CODE=$?
+    fi
     if [ $EXIT_CODE -eq 0 ]; then
         FAILURE_COUNT=0
     else

@@ -6,11 +6,47 @@ set -euo pipefail
 # non-root user, ironclaw runs under that same user via runuser.
 
 IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
-IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" 2>/dev/null | cut -d: -f6 || true)"
+
+# Ensure a same-named group exists even on systems where useradd doesn't create user-private groups.
+if ! getent group "${IRONCLAW_USER}" >/dev/null 2>&1; then
+    echo "Group '${IRONCLAW_USER}' not in group database — creating with groupadd"
+    if ! groupadd "${IRONCLAW_USER}"; then
+        echo "ERROR: groupadd failed for '${IRONCLAW_USER}'" >&2
+        exit 1
+    fi
+fi
+
+if ! getent passwd "${IRONCLAW_USER}" >/dev/null 2>&1; then
+    echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER})"
+    if ! useradd -g "${IRONCLAW_USER}" -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
+        echo "ERROR: useradd failed for '${IRONCLAW_USER}'" >&2
+        exit 1
+    fi
+fi
+
+IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" | cut -d: -f6)"
 if [ -z "${IRONCLAW_HOME}" ]; then
     echo "ERROR: Unable to resolve home directory for user '${IRONCLAW_USER}'" >&2
     exit 1
 fi
+IRONCLAW_GROUP="$(id -gn "${IRONCLAW_USER}" 2>/dev/null || true)"
+if [ -z "${IRONCLAW_GROUP}" ]; then
+    echo "ERROR: Unable to resolve primary group for user '${IRONCLAW_USER}'" >&2
+    exit 1
+fi
+if [ "${IRONCLAW_HOME#/}" = "${IRONCLAW_HOME}" ]; then
+    echo "ERROR: Refusing non-absolute IRONCLAW_HOME '${IRONCLAW_HOME}' for user '${IRONCLAW_USER}'" >&2
+    exit 1
+fi
+if [ "${IRONCLAW_HOME}" = "/" ]; then
+    echo "ERROR: Refusing unsafe IRONCLAW_HOME '/' for user '${IRONCLAW_USER}'" >&2
+    exit 1
+fi
+
+mkdir -p "${IRONCLAW_HOME}"
+# Volume mounts often land as root:root; fix the home directory inode only (not a recursive chown).
+# Use the explicit primary group for deterministic ownership semantics.
+chown "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}"
 
 # ============================================
 # SSH Server (non-root, port 2222)
@@ -25,7 +61,7 @@ if [ -n "${SSH_PUBKEY:-}" ]; then
     chmod 755 "${IRONCLAW_HOME}"
     chmod 700 "${IRONCLAW_HOME}/.ssh"
     chmod 600 "${IRONCLAW_HOME}/.ssh/authorized_keys"
-    chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ssh"
+    chown -R "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}/.ssh"
 
     # Generate any missing host keys
     mkdir -p /etc/ssh
@@ -93,7 +129,7 @@ fi
 # Ensure writable dirs
 # ============================================
 mkdir -p "${IRONCLAW_HOME}/.ironclaw/channels" "${IRONCLAW_HOME}/workspace"
-chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
+chown -R "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
 
 # ============================================
 # Start IronClaw with auto-restart
@@ -106,7 +142,7 @@ export HOME="${IRONCLAW_HOME}"
 
 while true; do
     echo "Starting IronClaw..."
-    chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace" 2>/dev/null || true
+    chown -R "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace" 2>/dev/null || true
     if [ "$#" -eq 0 ]; then
         runuser -p -u "${IRONCLAW_USER}" -- ironclaw run --no-onboard && EXIT_CODE=0 || EXIT_CODE=$?
     else

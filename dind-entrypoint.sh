@@ -11,8 +11,16 @@ if ! getent passwd "${IRONCLAW_USER}" >/dev/null 2>&1; then
     echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER})"
     # -U: create a user-private group (same name as user); avoids chown failing when USERGROUPS_ENAB=no
     if ! useradd -U -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
-        echo "ERROR: useradd failed for '${IRONCLAW_USER}'" >&2
-        exit 1
+        if getent group "${IRONCLAW_USER}" >/dev/null 2>&1; then
+            echo "Group '${IRONCLAW_USER}' already exists; retrying useradd with -g '${IRONCLAW_USER}'"
+            if ! useradd -g "${IRONCLAW_USER}" -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
+                echo "ERROR: useradd failed for '${IRONCLAW_USER}' (group exists)" >&2
+                exit 1
+            fi
+        else
+            echo "ERROR: useradd failed for '${IRONCLAW_USER}'" >&2
+            exit 1
+        fi
     fi
 fi
 

@@ -9,7 +9,8 @@ IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
 
 if ! getent passwd "${IRONCLAW_USER}" >/dev/null 2>&1; then
     echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER})"
-    if ! useradd -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
+    # -U: create a user-private group (same name as user); avoids chown failing when USERGROUPS_ENAB=no
+    if ! useradd -U -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
         echo "ERROR: useradd failed for '${IRONCLAW_USER}'" >&2
         exit 1
     fi
@@ -20,10 +21,19 @@ if [ -z "${IRONCLAW_HOME}" ]; then
     echo "ERROR: Unable to resolve home directory for user '${IRONCLAW_USER}'" >&2
     exit 1
 fi
+if [ "${IRONCLAW_HOME#/}" = "${IRONCLAW_HOME}" ]; then
+    echo "ERROR: Refusing non-absolute IRONCLAW_HOME '${IRONCLAW_HOME}' for user '${IRONCLAW_USER}'" >&2
+    exit 1
+fi
+if [ "${IRONCLAW_HOME}" = "/" ]; then
+    echo "ERROR: Refusing unsafe IRONCLAW_HOME '/' for user '${IRONCLAW_USER}'" >&2
+    exit 1
+fi
 
 mkdir -p "${IRONCLAW_HOME}"
 # Volume mounts often land as root:root; fix the home directory inode only (not a recursive chown).
-chown "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}"
+# Trailing ':' uses the user’s primary GID (no dependency on a same-named group existing).
+chown "${IRONCLAW_USER}:" "${IRONCLAW_HOME}"
 
 # ============================================
 # SSH Server (non-root, port 2222)
@@ -38,7 +48,7 @@ if [ -n "${SSH_PUBKEY:-}" ]; then
     chmod 755 "${IRONCLAW_HOME}"
     chmod 700 "${IRONCLAW_HOME}/.ssh"
     chmod 600 "${IRONCLAW_HOME}/.ssh/authorized_keys"
-    chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ssh"
+    chown -R "${IRONCLAW_USER}:" "${IRONCLAW_HOME}/.ssh"
 
     # Generate any missing host keys
     mkdir -p /etc/ssh
@@ -106,7 +116,7 @@ fi
 # Ensure writable dirs
 # ============================================
 mkdir -p "${IRONCLAW_HOME}/.ironclaw/channels" "${IRONCLAW_HOME}/workspace"
-chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
+chown -R "${IRONCLAW_USER}:" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace"
 
 # ============================================
 # Start IronClaw with auto-restart
@@ -119,7 +129,7 @@ export HOME="${IRONCLAW_HOME}"
 
 while true; do
     echo "Starting IronClaw..."
-    chown -R "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace" 2>/dev/null || true
+    chown -R "${IRONCLAW_USER}:" "${IRONCLAW_HOME}/.ironclaw" "${IRONCLAW_HOME}/workspace" 2>/dev/null || true
     if [ "$#" -eq 0 ]; then
         runuser -p -u "${IRONCLAW_USER}" -- ironclaw run --no-onboard && EXIT_CODE=0 || EXIT_CODE=$?
     else

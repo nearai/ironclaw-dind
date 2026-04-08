@@ -6,11 +6,24 @@ set -euo pipefail
 # non-root user, ironclaw runs under that same user via runuser.
 
 IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
-IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" 2>/dev/null | cut -d: -f6 || true)"
+
+if ! getent passwd "${IRONCLAW_USER}" >/dev/null 2>&1; then
+    echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER})"
+    if ! useradd -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
+        echo "ERROR: useradd failed for '${IRONCLAW_USER}'" >&2
+        exit 1
+    fi
+fi
+
+IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" | cut -d: -f6)"
 if [ -z "${IRONCLAW_HOME}" ]; then
     echo "ERROR: Unable to resolve home directory for user '${IRONCLAW_USER}'" >&2
     exit 1
 fi
+
+mkdir -p "${IRONCLAW_HOME}"
+# Volume mounts often land as root:root; fix the home directory inode only (not a recursive chown).
+chown "${IRONCLAW_USER}:${IRONCLAW_USER}" "${IRONCLAW_HOME}"
 
 # ============================================
 # SSH Server (non-root, port 2222)

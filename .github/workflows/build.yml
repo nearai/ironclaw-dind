@@ -88,13 +88,20 @@ jobs:
         id: tag
         if: steps.check.outputs.skip != 'true'
         run: |
+          RAW_TAG=""
           if [[ -n "${{ inputs.version }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            RAW_TAG="${{ inputs.version }}"
           elif [[ "${{ github.event_name }}" == "repository_dispatch" && -n "${{ github.event.client_payload.version }}" ]]; then
-            echo "tag=${{ github.event.client_payload.version }}" >> "$GITHUB_OUTPUT"
+            RAW_TAG="${{ github.event.client_payload.version }}"
           else
-            echo "tag=${{ env.DEFAULT_TAG }}" >> "$GITHUB_OUTPUT"
+            RAW_TAG="${{ env.DEFAULT_TAG }}"
           fi
+
+          if [[ ! "$RAW_TAG" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            echo "Invalid docker tag '$RAW_TAG'. Allowed characters: [A-Za-z0-9_.-]"
+            exit 1
+          fi
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Check existing version tag (skip unless forced)
         id: tag_guard
@@ -128,15 +135,15 @@ jobs:
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
           docker build \
-            --build-arg IRONCLAW_IMAGE=${{ steps.ironclaw.outputs.image }} \
-            --build-arg IRONCLAW_SOURCE_DIGEST=${{ steps.digest.outputs.upstream }} \
-            -t ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} \
+            --build-arg "IRONCLAW_IMAGE=${{ steps.ironclaw.outputs.image }}" \
+            --build-arg "IRONCLAW_SOURCE_DIGEST=${{ steps.digest.outputs.upstream }}" \
+            -t "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" \
             .
 
       - name: Push
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
-          docker push ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+          docker push "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
 
       - name: Summary
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'

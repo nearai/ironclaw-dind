@@ -17,7 +17,7 @@ on:
     branches: [main]
     tags: ["v*"]
   repository_dispatch:
-    types: [ironclaw_release_tag]
+    types: [ironclaw_image_published]
   schedule:
     # Check for upstream changes every 6 hours
     - cron: '0 */6 * * *'

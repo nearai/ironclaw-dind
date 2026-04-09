@@ -34,16 +34,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Determine ironclaw image
-        id: ironclaw
+      - name: Resolve build version and image
+        id: resolve
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
-            echo "image=nearaidev/ironclaw:${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          RAW_TAG=""
+          if [[ -n "${{ inputs.version }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            RAW_TAG="${{ inputs.version }}"
           elif [[ "${{ github.event_name }}" == "repository_dispatch" && -n "${{ github.event.client_payload.version }}" ]]; then
-            echo "image=nearaidev/ironclaw:${{ github.event.client_payload.version }}" >> "$GITHUB_OUTPUT"
+            RAW_TAG="${{ github.event.client_payload.version }}"
           else
-            echo "image=nearaidev/ironclaw:${{ env.DEFAULT_TAG }}" >> "$GITHUB_OUTPUT"
+            RAW_TAG="${{ env.DEFAULT_TAG }}"
           fi
+
+          if [[ ! "$RAW_TAG" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+            echo "Invalid docker tag '$RAW_TAG'. Allowed characters: [A-Za-z0-9_.-]"
+            exit 1
+          fi
+
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "image=nearaidev/ironclaw:$RAW_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -54,15 +63,15 @@ jobs:
       - name: Pull ironclaw image and detect version
         id: version
         run: |
-          docker pull "${{ steps.ironclaw.outputs.image }}"
-          VERSION=$(docker run --rm "${{ steps.ironclaw.outputs.image }}" --version | awk '{print $2}')
+          docker pull "${{ steps.resolve.outputs.image }}"
+          VERSION=$(docker run --rm "${{ steps.resolve.outputs.image }}" --version | awk '{print $2}')
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Detected IronClaw ${VERSION}"
 
       - name: Get upstream digest
         id: digest
         run: |
-          UPSTREAM_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${{ steps.ironclaw.outputs.image }}" | cut -d@ -f2)
+          UPSTREAM_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${{ steps.resolve.outputs.image }}" | cut -d@ -f2)
           echo "upstream=$UPSTREAM_DIGEST" >> "$GITHUB_OUTPUT"
           echo "Upstream digest: $UPSTREAM_DIGEST"
 
@@ -84,25 +93,6 @@ jobs:
             echo "Upstream changed — rebuilding"
           fi
 
-      - name: Determine tag
-        id: tag
-        if: steps.check.outputs.skip != 'true'
-        run: |
-          RAW_TAG=""
-          if [[ -n "${{ inputs.version }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            RAW_TAG="${{ inputs.version }}"
-          elif [[ "${{ github.event_name }}" == "repository_dispatch" && -n "${{ github.event.client_payload.version }}" ]]; then
-            RAW_TAG="${{ github.event.client_payload.version }}"
-          else
-            RAW_TAG="${{ env.DEFAULT_TAG }}"
-          fi
-
-          if [[ ! "$RAW_TAG" =~ ^[A-Za-z0-9_.-]+$ ]]; then
-            echo "Invalid docker tag '$RAW_TAG'. Allowed characters: [A-Za-z0-9_.-]"
-            exit 1
-          fi
-          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
-
       - name: Check existing version tag (skip unless forced)
         id: tag_guard
         if: steps.check.outputs.skip != 'true'
@@ -113,7 +103,7 @@ jobs:
           fi
           echo "force=$FORCE" >> "$GITHUB_OUTPUT"
 
-          TAG="${{ steps.tag.outputs.tag }}"
+          TAG="${{ steps.resolve.outputs.tag }}"
           if [[ "$TAG" == "${{ env.DEFAULT_TAG }}" ]]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "Default tag '${{ env.DEFAULT_TAG }}' is mutable; skipping immutable tag check."
@@ -135,15 +125,15 @@ jobs:
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
           docker build \
-            --build-arg "IRONCLAW_IMAGE=${{ steps.ironclaw.outputs.image }}" \
+            --build-arg "IRONCLAW_IMAGE=${{ steps.resolve.outputs.image }}" \
             --build-arg "IRONCLAW_SOURCE_DIGEST=${{ steps.digest.outputs.upstream }}" \
-            -t "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}" \
+            -t "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}" \
             .
 
       - name: Push
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
-          docker push "${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}"
+          docker push "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}"
 
       - name: Summary
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
@@ -151,8 +141,8 @@ jobs:
           {
             echo "## ironclaw-dind"
             echo ""
-            echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`"
-            echo "- ironclaw: \`${{ steps.ironclaw.outputs.image }}\` (v${{ steps.version.outputs.version }})"
+            echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}\`"
+            echo "- ironclaw: \`${{ steps.resolve.outputs.image }}\` (v${{ steps.version.outputs.version }})"
             echo "- source digest: \`${{ steps.digest.outputs.upstream }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -163,8 +153,8 @@ jobs:
             echo "## ironclaw-dind — skipped"
             echo ""
             if [[ "${{ steps.check.outputs.skip }}" == "true" ]]; then
-              echo "Upstream \`${{ steps.ironclaw.outputs.image }}\` digest unchanged."
+              echo "Upstream \`${{ steps.resolve.outputs.image }}\` digest unchanged."
             else
-              echo "Version tag already exists and force was not set: \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`"
+              echo "Version tag already exists and force was not set: \`${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}\`"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

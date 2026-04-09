@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      ironclaw_image:
+        description: 'Optional source image override (for example nearaidev/ironclaw-dind:latest)'
+        required: false
+        type: string
+        default: ''
       force:
         description: 'Force rebuild even if the version tag already exists'
         required: false
@@ -38,6 +43,7 @@ jobs:
         id: resolve
         run: |
           RAW_TAG=""
+          RESOLVED_IMAGE=""
           if [[ -n "${{ inputs.version }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             RAW_TAG="${{ inputs.version }}"
           elif [[ "${{ github.event_name }}" == "repository_dispatch" && -n "${{ github.event.client_payload.version }}" ]]; then
@@ -51,8 +57,16 @@ jobs:
             exit 1
           fi
 
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.ironclaw_image }}" ]]; then
+            RESOLVED_IMAGE="${{ inputs.ironclaw_image }}"
+          elif [[ "${{ github.event_name }}" == "repository_dispatch" && -n "${{ github.event.client_payload.ironclaw_image }}" ]]; then
+            RESOLVED_IMAGE="${{ github.event.client_payload.ironclaw_image }}"
+          else
+            RESOLVED_IMAGE="nearaidev/ironclaw:$RAW_TAG"
+          fi
+
           echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
-          echo "image=nearaidev/ironclaw:$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "image=$RESOLVED_IMAGE" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3

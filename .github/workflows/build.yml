@@ -3,40 +3,33 @@ name: Build & Push
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Image tag override (leave empty to auto-detect from ironclaw version)'
+      version:
+        description: 'Version tag to publish (for example v0.24.0)'
         required: false
         type: string
         default: ''
-      ironclaw_image:
-        description: 'Source ironclaw image (for binary)'
+      force:
+        description: 'Force rebuild even if the version tag already exists'
         required: false
-        type: string
-        default: nearaidev/ironclaw:latest
+        type: boolean
+        default: false
   push:
     branches: [main]
     tags: ["v*"]
+  repository_dispatch:
+    types: [ironclaw_release_tag]
   schedule:
     # Check for upstream changes every 6 hours
     - cron: '0 */6 * * *'
 
 env:
   IMAGE_NAME: nearaidev/ironclaw-dind
+  DEFAULT_TAG: staging
 
 jobs:
   build:
-    name: Build & Push (${{ matrix.variant }})
+    name: Build & Push
     runs-on: [self-hosted, sysbox]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: stable
-            ironclaw_image: nearaidev/ironclaw:latest
-            extra_tag: latest
-          - variant: staging
-            ironclaw_image: nearaidev/ironclaw:staging
-            extra_tag: staging
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,10 +37,12 @@ jobs:
       - name: Determine ironclaw image
         id: ironclaw
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.ironclaw_image }}" ]]; then
-            echo "image=${{ inputs.ironclaw_image }}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
+            echo "image=nearaidev/ironclaw:${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "repository_dispatch" && -n "${{ github.event.client_payload.version }}" ]]; then
+            echo "image=nearaidev/ironclaw:${{ github.event.client_payload.version }}" >> "$GITHUB_OUTPUT"
           else
-            echo "image=${{ matrix.ironclaw_image }}" >> "$GITHUB_OUTPUT"
+            echo "image=nearaidev/ironclaw:${{ env.DEFAULT_TAG }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Log in to Docker Hub
@@ -76,8 +71,8 @@ jobs:
         if: github.event_name == 'schedule'
         run: |
           CURRENT_DIGEST=""
-          if docker pull "${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}" > /dev/null 2>&1; then
-            CURRENT_DIGEST=$(docker inspect --format='{{index .Config.Labels "ironclaw.source.digest"}}' "${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}" 2>/dev/null || echo "")
+          if docker pull "${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}" > /dev/null 2>&1; then
+            CURRENT_DIGEST=$(docker inspect --format='{{index .Config.Labels "ironclaw.source.digest"}}' "${{ env.IMAGE_NAME }}:${{ env.DEFAULT_TAG }}" 2>/dev/null || echo "")
           fi
           echo "Current source digest: ${CURRENT_DIGEST:-<none>}"
           echo "Upstream digest: ${{ steps.digest.outputs.upstream }}"
@@ -93,14 +88,44 @@ jobs:
         id: tag
         if: steps.check.outputs.skip != 'true'
         run: |
-          if [[ -n "${{ inputs.tag }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          if [[ -n "${{ inputs.version }}" && "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "repository_dispatch" && -n "${{ github.event.client_payload.version }}" ]]; then
+            echo "tag=${{ github.event.client_payload.version }}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ env.DEFAULT_TAG }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check existing version tag (skip unless forced)
+        id: tag_guard
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          FORCE=false
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.force }}" == "true" ]]; then
+            FORCE=true
+          fi
+          echo "force=$FORCE" >> "$GITHUB_OUTPUT"
+
+          TAG="${{ steps.tag.outputs.tag }}"
+          if [[ "$TAG" == "${{ env.DEFAULT_TAG }}" ]]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Default tag '${{ env.DEFAULT_TAG }}' is mutable; skipping immutable tag check."
+            exit 0
+          fi
+          if docker manifest inspect "${{ env.IMAGE_NAME }}:${TAG}" > /dev/null 2>&1; then
+            if [[ "$FORCE" == "true" ]]; then
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+              echo "Version tag already exists, but force=true so build will continue."
+            else
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Version tag already exists, skipping build: ${{ env.IMAGE_NAME }}:${TAG}"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build DinD image
-        if: steps.check.outputs.skip != 'true'
+        if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
           docker build \
             --build-arg IRONCLAW_IMAGE=${{ steps.ironclaw.outputs.image }} \
@@ -108,33 +133,31 @@ jobs:
             -t ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} \
             .
 
-      - name: Tag extra
-        if: steps.check.outputs.skip != 'true'
-        run: docker tag ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }} ${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}
-
       - name: Push
-        if: steps.check.outputs.skip != 'true'
+        if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
           docker push ${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
-          docker push ${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}
 
       - name: Summary
-        if: steps.check.outputs.skip != 'true'
+        if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
           {
-            echo "## ironclaw-dind (${{ matrix.variant }})"
+            echo "## ironclaw-dind"
             echo ""
             echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`"
-            echo "- ${{ matrix.extra_tag }}: \`${{ env.IMAGE_NAME }}:${{ matrix.extra_tag }}\`"
             echo "- ironclaw: \`${{ steps.ironclaw.outputs.image }}\` (v${{ steps.version.outputs.version }})"
             echo "- source digest: \`${{ steps.digest.outputs.upstream }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summary (skipped)
-        if: steps.check.outputs.skip == 'true'
+        if: steps.check.outputs.skip == 'true' || steps.tag_guard.outputs.skip == 'true'
         run: |
           {
-            echo "## ironclaw-dind (${{ matrix.variant }}) — skipped"
+            echo "## ironclaw-dind — skipped"
             echo ""
-            echo "Upstream \`${{ steps.ironclaw.outputs.image }}\` digest unchanged."
+            if [[ "${{ steps.check.outputs.skip }}" == "true" ]]; then
+              echo "Upstream \`${{ steps.ironclaw.outputs.image }}\` digest unchanged."
+            else
+              echo "Version tag already exists and force was not set: \`${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}\`"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

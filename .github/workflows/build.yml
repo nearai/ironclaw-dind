@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag to publish (for example v0.24.0)'
+        description: 'Version tag to publish (for example 0.24.0). Leave empty to use default tag (staging).'
         required: false
         type: string
         default: ''

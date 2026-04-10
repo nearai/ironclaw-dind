@@ -135,6 +135,23 @@ jobs:
         run: |
           docker push "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}"
 
+      # Staging orchestrator allowlist: register immutable version tags only (not :staging)
+      - name: Register image on staging orchestrator allowlist
+        if: >-
+          steps.check.outputs.skip != 'true' &&
+          steps.tag_guard.outputs.skip != 'true' &&
+          steps.resolve.outputs.tag != env.DEFAULT_TAG &&
+          secrets.AGENTS_STG_ORCHESTRATOR_ADMIN_SECRET != ''
+        env:
+          ORCH_URL: https://api.agents-stg.near.ai
+          ORCH_ADMIN_SECRET: ${{ secrets.AGENTS_STG_ORCHESTRATOR_ADMIN_SECRET }}
+          IMAGE_REF: docker.io/${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/register_orchestrator_allowlist.py \
+            --label "Ironclaw DinD (${{ steps.resolve.outputs.tag }})" \
+            --note-suffix "CI ${GITHUB_RUN_ID}"
+
       - name: Resolve pushed ironclaw-dind digest
         id: dind_digest
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'

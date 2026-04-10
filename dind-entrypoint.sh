@@ -2,27 +2,24 @@
 set -euo pipefail
 
 # Start Docker daemon and SSH server, then hand off to ironclaw as non-root.
-# Mirrors the old openclaw-nearai-worker entrypoint behavior: SSH as a
-# non-root user, ironclaw runs under that same user via runuser.
+# Aligned with openclaw-nearai-worker/ironclaw-worker: default user agent, UID 1001,
+# bash login shell, .profile → .bashrc, sudo NOPASSWD, SSH on 2222.
 
-IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
-
-# Ensure a same-named group exists even on systems where useradd doesn't create user-private groups.
-if ! getent group "${IRONCLAW_USER}" >/dev/null 2>&1; then
-    echo "Group '${IRONCLAW_USER}' not in group database — creating with groupadd"
-    if ! groupadd "${IRONCLAW_USER}"; then
-        echo "ERROR: groupadd failed for '${IRONCLAW_USER}'" >&2
-        exit 1
-    fi
-fi
+# Same defaults as ironclaw-worker/Dockerfile (useradd -m -u 1001 -s /bin/bash agent)
+IRONCLAW_USER="${IRONCLAW_USER:-agent}"
+IRONCLAW_UID="${IRONCLAW_UID:-1001}"
 
 if ! getent passwd "${IRONCLAW_USER}" >/dev/null 2>&1; then
-    echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER})"
-    if ! useradd -g "${IRONCLAW_USER}" -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
+    echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER}, uid ${IRONCLAW_UID})"
+    if ! useradd -m -u "${IRONCLAW_UID}" -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
         echo "ERROR: useradd failed for '${IRONCLAW_USER}'" >&2
         exit 1
     fi
 fi
+
+# Passwordless sudo (matches ironclaw-worker: agent ALL=(ALL) NOPASSWD:ALL)
+echo "${IRONCLAW_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${IRONCLAW_USER}"
+chmod 440 "/etc/sudoers.d/${IRONCLAW_USER}"
 
 IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" | cut -d: -f6)"
 if [ -z "${IRONCLAW_HOME}" ]; then
@@ -43,10 +40,23 @@ if [ "${IRONCLAW_HOME}" = "/" ]; then
     exit 1
 fi
 
+# Use bash as login shell (base image may leave the default /bin/sh).
+usermod -s /bin/bash "${IRONCLAW_USER}" 2>/dev/null || true
+
 mkdir -p "${IRONCLAW_HOME}"
 # Volume mounts often land as root:root; fix the home directory inode only (not a recursive chown).
 # Use the explicit primary group for deterministic ownership semantics.
 chown "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}"
+
+# If home is empty or was replaced by a volume mount, restore login dotfiles from image skel.
+if [ -f /etc/skel/.bashrc ] && [ ! -f "${IRONCLAW_HOME}/.bashrc" ]; then
+    cp /etc/skel/.bashrc "${IRONCLAW_HOME}/.bashrc"
+    chown "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}/.bashrc"
+fi
+if [ -f /etc/skel/.profile ] && [ ! -f "${IRONCLAW_HOME}/.profile" ]; then
+    cp /etc/skel/.profile "${IRONCLAW_HOME}/.profile"
+    chown "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}/.profile"
+fi
 
 # ============================================
 # SSH Server (non-root, port 2222)
@@ -75,6 +85,7 @@ if [ -n "${SSH_PUBKEY:-}" ]; then
         -o PasswordAuthentication=no \
         -o PermitRootLogin=no \
         -o PrintMotd=no \
+        -o AcceptEnv="LANG LC_*" \
         -o PidFile=/run/sshd/sshd.pid; then
         echo "ERROR: Failed to start SSH daemon" >&2
         exit 1

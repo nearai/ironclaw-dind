@@ -152,6 +152,7 @@ jobs:
             exit 0
           fi
           python3 scripts/register_orchestrator_allowlist.py \
+            --no-resolve-digests \
             --label "Ironclaw DinD (${{ steps.resolve.outputs.tag }})" \
             --note-suffix "CI ${GITHUB_RUN_ID}"
 

@@ -8,13 +8,7 @@ FROM ${IRONCLAW_IMAGE}
 
 USER root
 
-# Interactive shell quality: UTF-8 locale, bash-completion. Skel matches
-# openclaw-nearai-worker/ironclaw-worker (.profile → .bashrc); entrypoint copies
-# into IRONCLAW_HOME when the user is created or home has no dotfiles.
-COPY shell/ironclaw.bashrc /etc/skel/.bashrc
-COPY shell/ironclaw.profile /etc/skel/.profile
-
-# Single apt pass: one index fetch, one layer (shell + DinD deps + SSH + sudo + locales).
+# Install system dependencies and tools
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bash \
@@ -29,8 +23,14 @@ RUN apt-get update \
     && locale-gen \
     && rm -f /etc/ssh/ssh_host_* \
     && rm -rf /var/lib/apt/lists/*
+
+# Consistent locale for interactive shells
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
+
+# Interactive shell quality: UTF-8 locale, bash-completion.
+COPY shell/ironclaw.bashrc /etc/skel/.bashrc
+COPY shell/ironclaw.profile /etc/skel/.profile
 
 # Copy Docker CLI and daemon from official image — ~60MB vs ~266MB from apt
 COPY --from=docker-bin /usr/local/bin/docker /usr/local/bin/docker

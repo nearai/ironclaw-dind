@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # Start Docker daemon and SSH server, then hand off to ironclaw as non-root.
-# Default user matches nearaidev/ironclaw base (ironclaw). Override with IRONCLAW_USER
-# for compose layouts that use another account (e.g. agent). Shell dotfiles follow
-# openclaw-nearai-worker/ironclaw-worker: .profile → .bashrc, sudo NOPASSWD, SSH on 2222.
+# Default IRONCLAW_USER=ironclaw (nearaidev/ironclaw base). Override (e.g. agent) via env.
+# No IRONCLAW_UID: useradd omits -u so new users get a system-assigned UID.
+# Shell dotfiles follow ironclaw-worker style: .profile → .bashrc, sudo NOPASSWD, SSH on 2222.
 
 IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
 

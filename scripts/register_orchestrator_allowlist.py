@@ -61,7 +61,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument(
         "--orch-url",
-        default=env.get("ORCH_URL", DEFAULT_ORCH_URL).rstrip("/"),
+        default=env.get("ORCH_URL", DEFAULT_ORCH_URL),
         help="API base URL (no trailing slash)",
     )
     p.add_argument(
@@ -83,6 +83,7 @@ def main() -> int:
         help="Skip POST /images/resolve-digests",
     )
     args = p.parse_args()
+    args.orch_url = args.orch_url.rstrip("/")
 
     secret = resolve_secret()
     if not secret:

@@ -140,14 +140,17 @@ jobs:
         if: >-
           steps.check.outputs.skip != 'true' &&
           steps.tag_guard.outputs.skip != 'true' &&
-          steps.resolve.outputs.tag != env.DEFAULT_TAG &&
-          secrets.AGENTS_STG_ORCHESTRATOR_ADMIN_SECRET != ''
+          steps.resolve.outputs.tag != env.DEFAULT_TAG
         env:
           ORCH_URL: https://api.agents-staging.near.ai
           ORCH_ADMIN_SECRET: ${{ secrets.AGENTS_STG_ORCHESTRATOR_ADMIN_SECRET }}
           IMAGE_REF: docker.io/${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}
         run: |
           set -euo pipefail
+          if [[ -z "${ORCH_ADMIN_SECRET:-}" ]]; then
+            echo "Skipping orchestrator allowlist (AGENTS_STG_ORCHESTRATOR_ADMIN_SECRET not set)."
+            exit 0
+          fi
           python3 scripts/register_orchestrator_allowlist.py \
             --label "Ironclaw DinD (${{ steps.resolve.outputs.tag }})" \
             --note-suffix "CI ${GITHUB_RUN_ID}"

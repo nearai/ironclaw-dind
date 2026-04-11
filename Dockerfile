@@ -8,6 +8,30 @@ FROM ${IRONCLAW_IMAGE}
 
 USER root
 
+# Install system dependencies and tools
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bash \
+        bash-completion \
+        curl \
+        iptables \
+        less \
+        locales \
+        openssh-server \
+        sudo \
+    && sed -i '/C\.UTF-8 UTF-8/s/^# *//' /etc/locale.gen \
+    && locale-gen \
+    && rm -f /etc/ssh/ssh_host_* \
+    && rm -rf /var/lib/apt/lists/*
+
+# Consistent locale for interactive shells
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# Interactive shell quality: UTF-8 locale, bash-completion.
+COPY shell/ironclaw.bashrc /etc/skel/.bashrc
+COPY shell/ironclaw.profile /etc/skel/.profile
+
 # Copy Docker CLI and daemon from official image — ~60MB vs ~266MB from apt
 COPY --from=docker-bin /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker-bin /usr/local/bin/dockerd /usr/local/bin/dockerd
@@ -15,14 +39,6 @@ COPY --from=docker-bin /usr/local/bin/containerd /usr/local/bin/containerd
 COPY --from=docker-bin /usr/local/bin/containerd-shim-runc-v2 /usr/local/bin/containerd-shim-runc-v2
 COPY --from=docker-bin /usr/local/bin/runc /usr/local/bin/runc
 COPY --from=docker-bin /usr/local/bin/docker-proxy /usr/local/bin/docker-proxy
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        curl \
-        iptables \
-        openssh-server \
-    && rm -f /etc/ssh/ssh_host_* \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY dind-entrypoint.sh /usr/local/bin/dind-entrypoint.sh
 RUN chmod 755 /usr/local/bin/dind-entrypoint.sh

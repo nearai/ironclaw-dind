@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # Start Docker daemon and SSH server, then hand off to ironclaw as non-root.
-# Mirrors the old openclaw-nearai-worker entrypoint behavior: SSH as a
-# non-root user, ironclaw runs under that same user via runuser.
+# Default IRONCLAW_USER=ironclaw (nearaidev/ironclaw base). Override (e.g. agent) via env.
+# No IRONCLAW_UID: useradd omits -u so new users get a system-assigned UID.
+# Shell dotfiles follow ironclaw-worker style: .profile → .bashrc, sudo NOPASSWD, SSH on 2222.
 
 IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
 
@@ -24,6 +25,10 @@ if ! getent passwd "${IRONCLAW_USER}" >/dev/null 2>&1; then
     fi
 fi
 
+# Passwordless sudo (same pattern as ironclaw-worker: NOPASSWD for the runtime user)
+echo "${IRONCLAW_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${IRONCLAW_USER}"
+chmod 440 "/etc/sudoers.d/${IRONCLAW_USER}"
+
 IRONCLAW_HOME="$(getent passwd "${IRONCLAW_USER}" | cut -d: -f6)"
 if [ -z "${IRONCLAW_HOME}" ]; then
     echo "ERROR: Unable to resolve home directory for user '${IRONCLAW_USER}'" >&2
@@ -43,10 +48,23 @@ if [ "${IRONCLAW_HOME}" = "/" ]; then
     exit 1
 fi
 
+# Use bash as login shell (base image may leave the default /bin/sh).
+usermod -s /bin/bash "${IRONCLAW_USER}" 2>/dev/null || true
+
 mkdir -p "${IRONCLAW_HOME}"
 # Volume mounts often land as root:root; fix the home directory inode only (not a recursive chown).
 # Use the explicit primary group for deterministic ownership semantics.
 chown "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}"
+
+# If home is empty or was replaced by a volume mount, restore login dotfiles from image skel.
+if [ -f /etc/skel/.bashrc ] && [ ! -f "${IRONCLAW_HOME}/.bashrc" ]; then
+    cp /etc/skel/.bashrc "${IRONCLAW_HOME}/.bashrc"
+    chown "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}/.bashrc"
+fi
+if [ -f /etc/skel/.profile ] && [ ! -f "${IRONCLAW_HOME}/.profile" ]; then
+    cp /etc/skel/.profile "${IRONCLAW_HOME}/.profile"
+    chown "${IRONCLAW_USER}:${IRONCLAW_GROUP}" "${IRONCLAW_HOME}/.profile"
+fi
 
 # ============================================
 # SSH Server (non-root, port 2222)
@@ -75,6 +93,7 @@ if [ -n "${SSH_PUBKEY:-}" ]; then
         -o PasswordAuthentication=no \
         -o PermitRootLogin=no \
         -o PrintMotd=no \
+        -o AcceptEnv="LANG LC_*" \
         -o PidFile=/run/sshd/sshd.pid; then
         echo "ERROR: Failed to start SSH daemon" >&2
         exit 1

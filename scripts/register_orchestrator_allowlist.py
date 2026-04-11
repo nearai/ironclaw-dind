@@ -9,7 +9,7 @@ Auth: same bearer as CRABSHACK_ADMIN_SECRET on the API (Authorization: Bearer ..
 Examples:
   ORCH_ADMIN_SECRET=… python3 scripts/register_orchestrator_allowlist.py
   ORCH_ADMIN_SECRET=… python3 scripts/register_orchestrator_allowlist.py \\
-    --orch-url https://api.agents-stg.near.ai \\
+    --orch-url https://api.agents-staging.near.ai \\
     --image-ref docker.io/nearaidev/ironclaw-dind:staging \\
     --note-suffix "manual 2026-04-10"
 """
@@ -22,7 +22,7 @@ from typing import Dict, Optional, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-DEFAULT_ORCH_URL = "https://api.agents-stg.near.ai"
+DEFAULT_ORCH_URL = "https://api.agents-staging.near.ai"
 DEFAULT_IMAGE_REF = "docker.io/nearaidev/ironclaw-dind:staging"
 DEFAULT_LABEL = "Ironclaw DinD (staging)"
 DEFAULT_SERVICE_TYPE = "ironclaw-dind"

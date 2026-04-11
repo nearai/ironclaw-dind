@@ -143,7 +143,7 @@ jobs:
           steps.resolve.outputs.tag != env.DEFAULT_TAG &&
           secrets.AGENTS_STG_ORCHESTRATOR_ADMIN_SECRET != ''
         env:
-          ORCH_URL: https://api.agents-stg.near.ai
+          ORCH_URL: https://api.agents-staging.near.ai
           ORCH_ADMIN_SECRET: ${{ secrets.AGENTS_STG_ORCHESTRATOR_ADMIN_SECRET }}
           IMAGE_REF: docker.io/${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}
         run: |

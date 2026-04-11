@@ -2,22 +2,30 @@
 set -euo pipefail
 
 # Start Docker daemon and SSH server, then hand off to ironclaw as non-root.
-# Aligned with openclaw-nearai-worker/ironclaw-worker: default user agent, UID 1001,
-# bash login shell, .profile → .bashrc, sudo NOPASSWD, SSH on 2222.
+# Default user matches nearaidev/ironclaw base (ironclaw). Override with IRONCLAW_USER
+# for compose layouts that use another account (e.g. agent). Shell dotfiles follow
+# openclaw-nearai-worker/ironclaw-worker: .profile → .bashrc, sudo NOPASSWD, SSH on 2222.
 
-# Same defaults as ironclaw-worker/Dockerfile (useradd -m -u 1001 -s /bin/bash agent)
-IRONCLAW_USER="${IRONCLAW_USER:-agent}"
-IRONCLAW_UID="${IRONCLAW_UID:-1001}"
+IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
+
+# Ensure a same-named group exists even on systems where useradd doesn't create user-private groups.
+if ! getent group "${IRONCLAW_USER}" >/dev/null 2>&1; then
+    echo "Group '${IRONCLAW_USER}' not in group database — creating with groupadd"
+    if ! groupadd "${IRONCLAW_USER}"; then
+        echo "ERROR: groupadd failed for '${IRONCLAW_USER}'" >&2
+        exit 1
+    fi
+fi
 
 if ! getent passwd "${IRONCLAW_USER}" >/dev/null 2>&1; then
-    echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER}, uid ${IRONCLAW_UID})"
-    if ! useradd -m -u "${IRONCLAW_UID}" -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
+    echo "User '${IRONCLAW_USER}' not in passwd — creating with useradd (home /home/${IRONCLAW_USER})"
+    if ! useradd -g "${IRONCLAW_USER}" -m -s /bin/bash -d "/home/${IRONCLAW_USER}" "${IRONCLAW_USER}"; then
         echo "ERROR: useradd failed for '${IRONCLAW_USER}'" >&2
         exit 1
     fi
 fi
 
-# Passwordless sudo (matches ironclaw-worker: agent ALL=(ALL) NOPASSWD:ALL)
+# Passwordless sudo (same pattern as ironclaw-worker: NOPASSWD for the runtime user)
 echo "${IRONCLAW_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${IRONCLAW_USER}"
 chmod 440 "/etc/sudoers.d/${IRONCLAW_USER}"
 

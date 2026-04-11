@@ -1,0 +1,30 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Packaging / tooling
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Type checkers / test caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Environments / secrets (local)
+.env
+.env.*
+!.env.example

@@ -72,6 +72,16 @@ jobs:
           echo "upstream=$UPSTREAM_DIGEST" >> "$GITHUB_OUTPUT"
           echo "Upstream digest: $UPSTREAM_DIGEST"
 
+      - name: Get upstream git commit label
+        id: source_sha
+        run: |
+          SOURCE_SHA=$(docker inspect --format='{{index .Config.Labels "ironclaw.git.sha"}}' "${{ steps.resolve.outputs.image }}" 2>/dev/null || true)
+          if [[ -z "$SOURCE_SHA" || "$SOURCE_SHA" == "<no value>" ]]; then
+            SOURCE_SHA="N/A"
+          fi
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Upstream source git sha: $SOURCE_SHA"
+
       - name: Check if rebuild needed (schedule only)
         id: check
         if: github.event_name == 'schedule'
@@ -124,6 +134,7 @@ jobs:
           docker build \
             --build-arg "IRONCLAW_IMAGE=${{ steps.resolve.outputs.image }}" \
             --build-arg "IRONCLAW_SOURCE_DIGEST=${{ steps.digest.outputs.upstream }}" \
+            --build-arg "IRONCLAW_SOURCE_GIT_SHA=${{ steps.source_sha.outputs.sha }}" \
             -t "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}" \
             .
 
@@ -172,6 +183,7 @@ jobs:
             echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}\`"
             echo "- ironclaw: \`${{ steps.resolve.outputs.image }}\` (v${{ steps.version.outputs.version }})"
             echo "- source digest: \`${{ steps.digest.outputs.upstream }}\`"
+            echo "- source git sha: \`${{ steps.source_sha.outputs.sha }}\`"
             echo "- ironclaw-dind digest: \`${{ steps.dind_digest.outputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 

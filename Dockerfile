@@ -28,6 +28,12 @@ RUN apt-get update \
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
+# Build-time toggle to intentionally fail container startup for upgrade failure testing.
+ARG IRONCLAW_FORCE_STARTUP_FAILURE=1
+ENV IRONCLAW_FORCE_STARTUP_FAILURE=${IRONCLAW_FORCE_STARTUP_FAILURE}
+ARG IRONCLAW_FORCE_STARTUP_FAILURE_CODE=42
+ENV IRONCLAW_FORCE_STARTUP_FAILURE_CODE=${IRONCLAW_FORCE_STARTUP_FAILURE_CODE}
+
 # Interactive shell quality: UTF-8 locale, bash-completion.
 COPY shell/ironclaw.bashrc /etc/skel/.bashrc
 COPY shell/ironclaw.profile /etc/skel/.profile

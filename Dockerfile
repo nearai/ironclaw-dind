@@ -46,5 +46,7 @@ RUN chmod 755 /usr/local/bin/dind-entrypoint.sh
 # Source digest label for scheduled rebuild detection
 ARG IRONCLAW_SOURCE_DIGEST=""
 LABEL ironclaw.source.digest="${IRONCLAW_SOURCE_DIGEST}"
+ARG IRONCLAW_SOURCE_GIT_SHA=""
+LABEL ironclaw.source.git.sha="${IRONCLAW_SOURCE_GIT_SHA}"
 
 ENTRYPOINT ["/usr/local/bin/dind-entrypoint.sh"]

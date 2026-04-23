@@ -16,17 +16,22 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - metadata/source-commit-map.json
   repository_dispatch:
     types: [ironclaw_image_published]
 
 env:
   IMAGE_NAME: nearaidev/ironclaw-dind
   DEFAULT_TAG: staging
+  SOURCE_MAP_PATH: metadata/source-commit-map.json
 
 jobs:
   build:
     name: Build & Push
     runs-on: [self-hosted, sysbox]
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,6 +76,16 @@ jobs:
           UPSTREAM_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${{ steps.resolve.outputs.image }}" | cut -d@ -f2)
           echo "upstream=$UPSTREAM_DIGEST" >> "$GITHUB_OUTPUT"
           echo "Upstream digest: $UPSTREAM_DIGEST"
+
+      - name: Get upstream git commit label
+        id: source_sha
+        run: |
+          SOURCE_SHA=$(docker inspect --format='{{index .Config.Labels "ironclaw.git.sha"}}' "${{ steps.resolve.outputs.image }}" 2>/dev/null || true)
+          if [[ -z "$SOURCE_SHA" || "$SOURCE_SHA" == "<no value>" ]]; then
+            SOURCE_SHA="N/A"
+          fi
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+          echo "Upstream source git sha: $SOURCE_SHA"
 
       - name: Check if rebuild needed (schedule only)
         id: check
@@ -124,6 +139,7 @@ jobs:
           docker build \
             --build-arg "IRONCLAW_IMAGE=${{ steps.resolve.outputs.image }}" \
             --build-arg "IRONCLAW_SOURCE_DIGEST=${{ steps.digest.outputs.upstream }}" \
+            --build-arg "IRONCLAW_SOURCE_GIT_SHA=${{ steps.source_sha.outputs.sha }}" \
             -t "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}" \
             .
 
@@ -163,6 +179,21 @@ jobs:
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
+      - name: Update and commit source commit map
+        if: >-
+          steps.check.outputs.skip != 'true' &&
+          steps.tag_guard.outputs.skip != 'true' &&
+          github.ref_name == 'main'
+        env:
+          DIND_DIGEST: ${{ steps.dind_digest.outputs.digest }}
+          SOURCE_DIGEST: ${{ steps.digest.outputs.upstream }}
+          SOURCE_GIT_SHA: ${{ steps.source_sha.outputs.sha }}
+          IMAGE_REF: docker.io/${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}
+          IMAGE_TAG: ${{ steps.resolve.outputs.tag }}
+          SOURCE_MAP_PATH: ${{ env.SOURCE_MAP_PATH }}
+          CI_COMMIT_MAP: "true"
+        run: python3 scripts/update_source_commit_map.py
+
       - name: Summary
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
@@ -172,6 +203,7 @@ jobs:
             echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}\`"
             echo "- ironclaw: \`${{ steps.resolve.outputs.image }}\` (v${{ steps.version.outputs.version }})"
             echo "- source digest: \`${{ steps.digest.outputs.upstream }}\`"
+            echo "- source git sha: \`${{ steps.source_sha.outputs.sha }}\`"
             echo "- ironclaw-dind digest: \`${{ steps.dind_digest.outputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 

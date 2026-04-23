@@ -16,17 +16,22 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - metadata/source-commit-map.json
   repository_dispatch:
     types: [ironclaw_image_published]
 
 env:
   IMAGE_NAME: nearaidev/ironclaw-dind
   DEFAULT_TAG: staging
+  SOURCE_MAP_PATH: metadata/source-commit-map.json
 
 jobs:
   build:
     name: Build & Push
     runs-on: [self-hosted, sysbox]
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -173,6 +178,21 @@ jobs:
             DIGEST="N/A"
           fi
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Update and commit source commit map
+        if: >-
+          steps.check.outputs.skip != 'true' &&
+          steps.tag_guard.outputs.skip != 'true' &&
+          github.ref_name == 'main'
+        env:
+          DIND_DIGEST: ${{ steps.dind_digest.outputs.digest }}
+          SOURCE_DIGEST: ${{ steps.digest.outputs.upstream }}
+          SOURCE_GIT_SHA: ${{ steps.source_sha.outputs.sha }}
+          IMAGE_REF: docker.io/${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}
+          IMAGE_TAG: ${{ steps.resolve.outputs.tag }}
+          SOURCE_MAP_PATH: ${{ env.SOURCE_MAP_PATH }}
+          CI_COMMIT_MAP: "true"
+        run: python3 scripts/update_source_commit_map.py
 
       - name: Summary
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'

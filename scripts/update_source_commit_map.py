@@ -46,18 +46,19 @@ def _update_map(path: Path) -> bool:
 
     data = _load_map(path)
     images = data.setdefault("images", {})
-    images[digest] = {
+    next_entry = {
         "source_git_sha": _env("SOURCE_GIT_SHA"),
         "source_digest": _env("SOURCE_DIGEST"),
         "image_ref": _env("IMAGE_REF"),
         "version": _env("IMAGE_TAG"),
     }
-    data["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    before = path.read_text() if path.exists() else None
-    after = json.dumps(data, indent=2, sort_keys=True) + "\n"
-    if before == after:
+    current_entry = images.get(digest)
+    if current_entry == next_entry:
         return False
+
+    images[digest] = next_entry
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    after = json.dumps(data, indent=2, sort_keys=True) + "\n"
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(after)

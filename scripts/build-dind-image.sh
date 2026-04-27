@@ -30,14 +30,12 @@ run_build() {
   "${args[@]}"
 }
 
-echo "Building ${IMAGE_REF} from ${IRONCLAW_IMAGE}..."
 set +e
 run_build 2>&1 | tee "$BUILD_LOG"
 first_exit="${PIPESTATUS[0]}"
 set -e
 
 if [[ "$first_exit" -eq 0 ]]; then
-  echo "Build succeeded on first attempt."
   exit 0
 fi
 
@@ -45,7 +43,6 @@ if grep -Eq "parent snapshot sha256:[a-f0-9]{64} does not exist" "$BUILD_LOG"; t
   echo "Detected orphaned BuildKit snapshot cache entry. Pruning builder cache and retrying once with --no-cache..."
   docker builder prune -af
   run_build --no-cache
-  echo "Build succeeded after BuildKit cache reset."
   exit 0
 fi
 

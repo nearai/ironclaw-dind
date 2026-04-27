@@ -121,11 +121,10 @@ jobs:
       - name: Build DinD image
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         run: |
-          docker build \
-            --build-arg "IRONCLAW_IMAGE=${{ steps.resolve.outputs.image }}" \
-            --build-arg "IRONCLAW_SOURCE_DIGEST=${{ steps.digest.outputs.upstream }}" \
-            -t "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}" \
-            .
+          bash ./scripts/build-dind-image.sh \
+            "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}" \
+            "${{ steps.resolve.outputs.image }}" \
+            "${{ steps.digest.outputs.upstream }}"
 
       - name: Push
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'

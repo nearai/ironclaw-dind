@@ -33,6 +33,10 @@ SANDBOX_IMAGE_ALIAS=ironclaw-worker:latest \
 bash scripts/build-dind-image.sh ironclaw-dind nearaidev/ironclaw:<tag> <source-digest>
 ```
 
+The bake step starts a temporary DinD container with `--runtime=sysbox-runc` by
+default. For local Docker Desktop checks without Sysbox, use
+`DIND_BAKE_RUN_ARGS=--privileged`.
+
 ## Run
 
 ```bash

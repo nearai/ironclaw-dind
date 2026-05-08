@@ -11,16 +11,20 @@ OUTPUT_TAG="${3:?$USAGE}"
 SANDBOX_IMAGE_SOURCE="${4:-}"
 IRONCLAW_SOURCE_DIGEST="${5:-}"
 SANDBOX_IMAGE_ALIAS="${SANDBOX_IMAGE_ALIAS:-ironclaw-worker:latest}"
+DIND_BAKE_RUN_ARGS="${DIND_BAKE_RUN_ARGS:---runtime=sysbox-runc}"
+read -r -a DIND_BAKE_RUN_ARGS_ARRAY <<< "$DIND_BAKE_RUN_ARGS"
 
 CONTAINER_NAME="dind-bake-$$"
 
 echo "==> Starting temporary DinD container from $DIND_IMAGE..."
-docker run --runtime=sysbox-runc -d --name "$CONTAINER_NAME" \
+docker run "${DIND_BAKE_RUN_ARGS_ARRAY[@]}" -d --name "$CONTAINER_NAME" \
     --entrypoint /bin/sh \
-    -v "$(realpath "$SANDBOX_TAR")":/tmp/sandbox.tar:ro \
     "$DIND_IMAGE" -c "dockerd > /var/log/dockerd.log 2>&1 & sleep infinity"
 
 trap 'docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true' EXIT
+
+echo "==> Copying sandbox archive..."
+docker cp "$(realpath "$SANDBOX_TAR")" "$CONTAINER_NAME":/tmp/sandbox.tar
 
 echo "==> Waiting for inner dockerd..."
 elapsed=0

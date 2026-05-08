@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Pre-loads the sandbox image into a DinD image's inner Docker storage via
 # docker commit, so nested containers start with the image already cached.
-# Usage: ./bake-inner-image.sh <dind-image> <sandbox-tar> <output-tag> [sandbox-image-id] [ironclaw-version]
+# Usage: ./bake-inner-image.sh <dind-image> <sandbox-tar> <output-tag> [sandbox-image-source] [ironclaw-source-digest]
 set -euo pipefail
 
-USAGE="Usage: $0 <dind-image> <sandbox-tar> <output-tag> [sandbox-image-id] [ironclaw-version]"
+USAGE="Usage: $0 <dind-image> <sandbox-tar> <output-tag> [sandbox-image-source] [ironclaw-source-digest]"
 DIND_IMAGE="${1:?$USAGE}"
 SANDBOX_TAR="${2:?$USAGE}"
 OUTPUT_TAG="${3:?$USAGE}"
-SANDBOX_IMAGE_ID="${4:-}"
-IRONCLAW_VERSION="${5:-}"
+SANDBOX_IMAGE_SOURCE="${4:-}"
+IRONCLAW_SOURCE_DIGEST="${5:-}"
+SANDBOX_IMAGE_ALIAS="${SANDBOX_IMAGE_ALIAS:-ironclaw-worker:latest}"
 
 CONTAINER_NAME="dind-bake-$$"
 
@@ -45,9 +46,11 @@ if [ -z "$LOADED_IMAGE" ]; then
     echo "ERROR: could not determine loaded image name from: $LOAD_OUTPUT" >&2
     exit 1
 fi
-echo "==> Tagging $LOADED_IMAGE as ironclaw-worker:latest..."
-docker exec "$CONTAINER_NAME" docker tag "$LOADED_IMAGE" ironclaw-worker:latest
-docker exec "$CONTAINER_NAME" docker rmi "$LOADED_IMAGE"
+echo "==> Tagging $LOADED_IMAGE as $SANDBOX_IMAGE_ALIAS..."
+docker exec "$CONTAINER_NAME" docker tag "$LOADED_IMAGE" "$SANDBOX_IMAGE_ALIAS"
+if [ -n "$SANDBOX_IMAGE_SOURCE" ] && [ "$SANDBOX_IMAGE_SOURCE" != "$SANDBOX_IMAGE_ALIAS" ]; then
+    docker exec "$CONTAINER_NAME" docker tag "$LOADED_IMAGE" "$SANDBOX_IMAGE_SOURCE"
+fi
 echo "==> Stopping inner dockerd..."
 docker exec "$CONTAINER_NAME" sh -c '
     [ -f /var/run/docker.pid ] && kill "$(cat /var/run/docker.pid)" 2>/dev/null
@@ -55,12 +58,17 @@ docker exec "$CONTAINER_NAME" sh -c '
     sleep 3
 '
 
-COMMIT_ARGS=(-c 'ENTRYPOINT ["/usr/local/bin/dind-entrypoint.sh"]')
-if [ -n "$SANDBOX_IMAGE_ID" ]; then
-    COMMIT_ARGS+=(-c "LABEL sandbox.image.id=$SANDBOX_IMAGE_ID")
+COMMIT_ARGS=(
+    -c 'ENTRYPOINT ["/usr/local/bin/dind-entrypoint.sh"]'
+    -c "ENV SANDBOX_IMAGE=$SANDBOX_IMAGE_ALIAS"
+    -c "ENV SANDBOX_IMAGE_SOURCE=${SANDBOX_IMAGE_SOURCE:-$SANDBOX_IMAGE_ALIAS}"
+    -c "ENV SANDBOX_AUTO_PULL=false"
+)
+if [ -n "$SANDBOX_IMAGE_SOURCE" ]; then
+    COMMIT_ARGS+=(-c "LABEL sandbox.image.source=$SANDBOX_IMAGE_SOURCE")
 fi
-if [ -n "$IRONCLAW_VERSION" ]; then
-    COMMIT_ARGS+=(-c "LABEL ironclaw.version=$IRONCLAW_VERSION")
+if [ -n "$IRONCLAW_SOURCE_DIGEST" ]; then
+    COMMIT_ARGS+=(-c "LABEL ironclaw.source.digest=$IRONCLAW_SOURCE_DIGEST")
 fi
 
 echo "==> Committing container as $OUTPUT_TAG..."

@@ -126,16 +126,55 @@ echo "Docker daemon ready after ${elapsed}s"
 usermod -aG docker "${IRONCLAW_USER}" 2>/dev/null || true
 chmod 666 /var/run/docker.sock 2>/dev/null || true
 
-# Pre-pull the sandbox worker image in the background so ironclaw starts immediately.
-# Also tag as short name — ironclaw internally references "ironclaw-worker:latest".
-SANDBOX_IMAGE="${SANDBOX_IMAGE:-nearaidev/ironclaw-worker:latest}"
-(
-    if ! docker image inspect "$SANDBOX_IMAGE" > /dev/null 2>&1; then
-        echo "Pulling sandbox image ${SANDBOX_IMAGE} in background..."
-        docker pull "$SANDBOX_IMAGE" && echo "Sandbox image ready" || echo "WARNING: Failed to pull ${SANDBOX_IMAGE}" >&2
+# Use the worker image baked into the inner Docker image store at build time.
+# The DinD daemon has its own image store, so runtime pulls here add startup
+# latency and can fail on restricted networks. CI bakes this alias via
+# scripts/bake-inner-image.sh. Operators can opt back into pull fallback with
+# SANDBOX_PULL_IF_MISSING=true.
+if [ "${SANDBOX_IMAGE:-}" = "self" ] || [ "${SANDBOX_IMAGE:-}" = "ironclaw:self" ]; then
+    echo "WARNING: SANDBOX_IMAGE=${SANDBOX_IMAGE} is not valid under DinD; using ironclaw-worker:latest" >&2
+    unset SANDBOX_IMAGE
+fi
+
+if [ -z "${SANDBOX_IMAGE:-}" ]; then
+    SANDBOX_IMAGE="ironclaw-worker:latest"
+    SANDBOX_IMAGE_SOURCE="${SANDBOX_IMAGE_SOURCE:-nearaidev/ironclaw-worker:latest}"
+else
+    SANDBOX_IMAGE_SOURCE="${SANDBOX_IMAGE_SOURCE:-$SANDBOX_IMAGE}"
+fi
+SANDBOX_PULL_IF_MISSING="${SANDBOX_PULL_IF_MISSING:-false}"
+SANDBOX_AUTO_PULL="${SANDBOX_AUTO_PULL:-false}"
+export SANDBOX_IMAGE SANDBOX_AUTO_PULL
+
+ensure_sandbox_image() {
+    if docker image inspect "$SANDBOX_IMAGE" > /dev/null 2>&1; then
+        echo "Sandbox image ${SANDBOX_IMAGE} already available in inner Docker."
+        return 0
     fi
-    docker tag "$SANDBOX_IMAGE" ironclaw-worker:latest 2>/dev/null || true
-) &
+
+    if [ "$SANDBOX_IMAGE_SOURCE" != "$SANDBOX_IMAGE" ] \
+        && docker image inspect "$SANDBOX_IMAGE_SOURCE" > /dev/null 2>&1; then
+        echo "Tagging baked sandbox image ${SANDBOX_IMAGE_SOURCE} as ${SANDBOX_IMAGE}..."
+        docker tag "$SANDBOX_IMAGE_SOURCE" "$SANDBOX_IMAGE"
+        return 0
+    fi
+
+    if [ "$SANDBOX_PULL_IF_MISSING" = "true" ]; then
+        echo "Sandbox image ${SANDBOX_IMAGE} missing; pulling ${SANDBOX_IMAGE_SOURCE}..."
+        docker pull "$SANDBOX_IMAGE_SOURCE"
+        if [ "$SANDBOX_IMAGE_SOURCE" != "$SANDBOX_IMAGE" ]; then
+            docker tag "$SANDBOX_IMAGE_SOURCE" "$SANDBOX_IMAGE"
+        fi
+        echo "Sandbox image ready"
+        return 0
+    fi
+
+    echo "WARNING: Sandbox image ${SANDBOX_IMAGE} is missing from inner Docker." >&2
+    echo "WARNING: Rebuild ironclaw-dind with scripts/build-dind-image.sh or set SANDBOX_PULL_IF_MISSING=true." >&2
+    return 1
+}
+
+ensure_sandbox_image || exit 1
 
 # ============================================
 # OAuth callback (if domain and instance name are available)

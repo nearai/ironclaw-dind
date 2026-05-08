@@ -10,12 +10,11 @@ IMAGE_REF="$1"
 IRONCLAW_IMAGE="$2"
 SOURCE_DIGEST="$3"
 BUILD_LOG="$(mktemp)"
-SANDBOX_IMAGE_ALIAS="${SANDBOX_IMAGE_ALIAS:-ironclaw-worker:latest}"
 BASE_IMAGE_REF="${IMAGE_REF}-prebake"
 SANDBOX_TAR="$(mktemp -t ironclaw-sandbox-image.XXXXXX.tar)"
 trap 'rm -f "$BUILD_LOG" "$SANDBOX_TAR"; docker image rm "$BASE_IMAGE_REF" >/dev/null 2>&1 || true' EXIT
 
-default_sandbox_image_source() {
+default_sandbox_image() {
   local image_ref="$1"
   local without_digest="${image_ref%%@*}"
   local last_component="${without_digest##*/}"
@@ -28,7 +27,7 @@ default_sandbox_image_source() {
   echo "nearaidev/ironclaw-worker:${tag}"
 }
 
-SANDBOX_IMAGE_SOURCE="${SANDBOX_IMAGE_SOURCE:-$(default_sandbox_image_source "$IRONCLAW_IMAGE")}"
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-$(default_sandbox_image "$IRONCLAW_IMAGE")}"
 
 run_build() {
   local image_ref="$1"
@@ -49,9 +48,9 @@ run_build() {
   "${args[@]}"
 }
 
-echo "Preparing sandbox image archive: ${SANDBOX_IMAGE_SOURCE} -> ${SANDBOX_IMAGE_ALIAS}"
-docker pull "${SANDBOX_IMAGE_SOURCE}"
-docker save "${SANDBOX_IMAGE_SOURCE}" -o "${SANDBOX_TAR}"
+echo "Preparing sandbox image archive: ${SANDBOX_IMAGE}"
+docker pull "${SANDBOX_IMAGE}"
+docker save "${SANDBOX_IMAGE}" -o "${SANDBOX_TAR}"
 
 set +e
 run_build "$BASE_IMAGE_REF" 2>&1 | tee "$BUILD_LOG"
@@ -69,10 +68,9 @@ if [[ "$first_exit" -ne 0 ]]; then
   fi
 fi
 
-SANDBOX_IMAGE_ALIAS="$SANDBOX_IMAGE_ALIAS" \
-  bash ./scripts/bake-inner-image.sh \
-    "$BASE_IMAGE_REF" \
-    "$SANDBOX_TAR" \
-    "$IMAGE_REF" \
-    "$SANDBOX_IMAGE_SOURCE" \
-    "$SOURCE_DIGEST"
+bash ./scripts/bake-inner-image.sh \
+  "$BASE_IMAGE_REF" \
+  "$SANDBOX_TAR" \
+  "$IMAGE_REF" \
+  "$SANDBOX_IMAGE" \
+  "$SOURCE_DIGEST"

@@ -5,7 +5,7 @@ Thin wrapper on [nearaidev/ironclaw](https://hub.docker.com/r/nearaidev/ironclaw
 ## What it adds
 
 - Docker CLI/daemon binaries + `iptables`
-- A DinD entrypoint that starts `dockerd`, verifies the baked `ironclaw-worker:latest` image is available in the inner Docker store, then execs `ironclaw`
+- A DinD entrypoint that starts `dockerd`, verifies the baked worker image is available in the inner Docker store, then execs `ironclaw`
 
 Everything else (the ironclaw binary, runtime, user) comes from the base image.
 
@@ -23,13 +23,12 @@ bash scripts/build-dind-image.sh \
   local
 ```
 
-By default the baked sandbox source is derived from the IronClaw image tag
-(`nearaidev/ironclaw:<tag>` -> `nearaidev/ironclaw-worker:<tag>`) and the
-inner-Docker alias is `ironclaw-worker:latest`. Override them with:
+By default the baked sandbox image is derived from the IronClaw image tag
+(`nearaidev/ironclaw:<tag>` -> `nearaidev/ironclaw-worker:<tag>`). Override it
+with:
 
 ```bash
-SANDBOX_IMAGE_SOURCE=nearaidev/ironclaw-worker:<tag> \
-SANDBOX_IMAGE_ALIAS=ironclaw-worker:latest \
+SANDBOX_IMAGE=nearaidev/ironclaw-worker:<tag> \
 bash scripts/build-dind-image.sh ironclaw-dind nearaidev/ironclaw:<tag> <source-digest>
 ```
 

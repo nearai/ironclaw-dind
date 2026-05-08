@@ -122,8 +122,7 @@ jobs:
       - name: Build DinD image
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
         env:
-          SANDBOX_IMAGE_SOURCE: ${{ steps.resolve.outputs.worker_image }}
-          SANDBOX_IMAGE_ALIAS: ironclaw-worker:latest
+          SANDBOX_IMAGE: ${{ steps.resolve.outputs.worker_image }}
         run: |
           bash ./scripts/build-dind-image.sh \
             "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}" \

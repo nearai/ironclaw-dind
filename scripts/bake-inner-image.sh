@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # Pre-loads the sandbox image into a DinD image's inner Docker storage via
 # docker commit, so nested containers start with the image already cached.
-# Usage: ./bake-inner-image.sh <dind-image> <sandbox-tar> <output-tag> [sandbox-image-source] [ironclaw-source-digest]
+# Usage: ./bake-inner-image.sh <dind-image> <sandbox-tar> <output-tag> [sandbox-image] [ironclaw-source-digest]
 set -euo pipefail
 
-USAGE="Usage: $0 <dind-image> <sandbox-tar> <output-tag> [sandbox-image-source] [ironclaw-source-digest]"
+USAGE="Usage: $0 <dind-image> <sandbox-tar> <output-tag> [sandbox-image] [ironclaw-source-digest]"
 DIND_IMAGE="${1:?$USAGE}"
 SANDBOX_TAR="${2:?$USAGE}"
 OUTPUT_TAG="${3:?$USAGE}"
-SANDBOX_IMAGE_SOURCE="${4:-}"
+SANDBOX_IMAGE="${4:-}"
 IRONCLAW_SOURCE_DIGEST="${5:-}"
-SANDBOX_IMAGE_ALIAS="${SANDBOX_IMAGE_ALIAS:-ironclaw-worker:latest}"
 DIND_BAKE_RUN_ARGS="${DIND_BAKE_RUN_ARGS:---runtime=sysbox-runc}"
 read -r -a DIND_BAKE_RUN_ARGS_ARRAY <<< "$DIND_BAKE_RUN_ARGS"
 
@@ -50,10 +49,10 @@ if [ -z "$LOADED_IMAGE" ]; then
     echo "ERROR: could not determine loaded image name from: $LOAD_OUTPUT" >&2
     exit 1
 fi
-echo "==> Tagging $LOADED_IMAGE as $SANDBOX_IMAGE_ALIAS..."
-docker exec "$CONTAINER_NAME" docker tag "$LOADED_IMAGE" "$SANDBOX_IMAGE_ALIAS"
-if [ -n "$SANDBOX_IMAGE_SOURCE" ] && [ "$SANDBOX_IMAGE_SOURCE" != "$SANDBOX_IMAGE_ALIAS" ]; then
-    docker exec "$CONTAINER_NAME" docker tag "$LOADED_IMAGE" "$SANDBOX_IMAGE_SOURCE"
+SANDBOX_IMAGE="${SANDBOX_IMAGE:-$LOADED_IMAGE}"
+if [ "$LOADED_IMAGE" != "$SANDBOX_IMAGE" ]; then
+    echo "==> Tagging $LOADED_IMAGE as $SANDBOX_IMAGE..."
+    docker exec "$CONTAINER_NAME" docker tag "$LOADED_IMAGE" "$SANDBOX_IMAGE"
 fi
 echo "==> Stopping inner dockerd..."
 docker exec "$CONTAINER_NAME" sh -c '
@@ -64,13 +63,10 @@ docker exec "$CONTAINER_NAME" sh -c '
 
 COMMIT_ARGS=(
     -c 'ENTRYPOINT ["/usr/local/bin/dind-entrypoint.sh"]'
-    -c "ENV SANDBOX_IMAGE=$SANDBOX_IMAGE_ALIAS"
-    -c "ENV SANDBOX_IMAGE_SOURCE=${SANDBOX_IMAGE_SOURCE:-$SANDBOX_IMAGE_ALIAS}"
+    -c "ENV SANDBOX_IMAGE=$SANDBOX_IMAGE"
     -c "ENV SANDBOX_AUTO_PULL=false"
+    -c "LABEL sandbox.image=$SANDBOX_IMAGE"
 )
-if [ -n "$SANDBOX_IMAGE_SOURCE" ]; then
-    COMMIT_ARGS+=(-c "LABEL sandbox.image.source=$SANDBOX_IMAGE_SOURCE")
-fi
 if [ -n "$IRONCLAW_SOURCE_DIGEST" ]; then
     COMMIT_ARGS+=(-c "LABEL ironclaw.source.digest=$IRONCLAW_SOURCE_DIGEST")
 fi

@@ -128,19 +128,16 @@ chmod 666 /var/run/docker.sock 2>/dev/null || true
 
 # Use the worker image baked into the inner Docker image store at build time.
 # The DinD daemon has its own image store, so runtime pulls here add startup
-# latency and can fail on restricted networks. CI bakes this alias via
-# scripts/bake-inner-image.sh. Operators can opt back into pull fallback with
-# SANDBOX_PULL_IF_MISSING=true.
+# latency and can fail on restricted networks. CI bakes the matching worker
+# tag via scripts/bake-inner-image.sh. Operators can opt back into pull
+# fallback with SANDBOX_PULL_IF_MISSING=true.
 if [ "${SANDBOX_IMAGE:-}" = "self" ] || [ "${SANDBOX_IMAGE:-}" = "ironclaw:self" ]; then
-    echo "WARNING: SANDBOX_IMAGE=${SANDBOX_IMAGE} is not valid under DinD; using ironclaw-worker:latest" >&2
+    echo "WARNING: SANDBOX_IMAGE=${SANDBOX_IMAGE} is not valid under DinD; using nearaidev/ironclaw-worker:latest" >&2
     unset SANDBOX_IMAGE
 fi
 
 if [ -z "${SANDBOX_IMAGE:-}" ]; then
-    SANDBOX_IMAGE="ironclaw-worker:latest"
-    SANDBOX_IMAGE_SOURCE="${SANDBOX_IMAGE_SOURCE:-nearaidev/ironclaw-worker:latest}"
-else
-    SANDBOX_IMAGE_SOURCE="${SANDBOX_IMAGE_SOURCE:-$SANDBOX_IMAGE}"
+    SANDBOX_IMAGE="nearaidev/ironclaw-worker:latest"
 fi
 SANDBOX_PULL_IF_MISSING="${SANDBOX_PULL_IF_MISSING:-false}"
 SANDBOX_AUTO_PULL="${SANDBOX_AUTO_PULL:-false}"
@@ -152,19 +149,9 @@ ensure_sandbox_image() {
         return 0
     fi
 
-    if [ "$SANDBOX_IMAGE_SOURCE" != "$SANDBOX_IMAGE" ] \
-        && docker image inspect "$SANDBOX_IMAGE_SOURCE" > /dev/null 2>&1; then
-        echo "Tagging baked sandbox image ${SANDBOX_IMAGE_SOURCE} as ${SANDBOX_IMAGE}..."
-        docker tag "$SANDBOX_IMAGE_SOURCE" "$SANDBOX_IMAGE"
-        return 0
-    fi
-
     if [ "$SANDBOX_PULL_IF_MISSING" = "true" ]; then
-        echo "Sandbox image ${SANDBOX_IMAGE} missing; pulling ${SANDBOX_IMAGE_SOURCE}..."
-        docker pull "$SANDBOX_IMAGE_SOURCE"
-        if [ "$SANDBOX_IMAGE_SOURCE" != "$SANDBOX_IMAGE" ]; then
-            docker tag "$SANDBOX_IMAGE_SOURCE" "$SANDBOX_IMAGE"
-        fi
+        echo "Sandbox image ${SANDBOX_IMAGE} missing; pulling..."
+        docker pull "$SANDBOX_IMAGE"
         echo "Sandbox image ready"
         return 0
     fi

@@ -14,21 +14,21 @@ DIND_BAKE_RUN_ARGS="${DIND_BAKE_RUN_ARGS:---runtime=sysbox-runc}"
 read -r -a DIND_BAKE_RUN_ARGS_ARRAY <<< "$DIND_BAKE_RUN_ARGS"
 
 CONTAINER_NAME="dind-bake-$$"
+SANDBOX_TAR_PATH="$(realpath "$SANDBOX_TAR")"
+SANDBOX_ARCHIVE_PATH="/tmp/sandbox.tar"
+
+chmod a+r "$SANDBOX_TAR_PATH"
 
 echo "==> Starting temporary DinD container from $DIND_IMAGE..."
 docker run "${DIND_BAKE_RUN_ARGS_ARRAY[@]}" -d --name "$CONTAINER_NAME" \
+    -v "${SANDBOX_TAR_PATH}:${SANDBOX_ARCHIVE_PATH}:ro" \
     --entrypoint /bin/sh \
     "$DIND_IMAGE" -c "dockerd > /var/log/dockerd.log 2>&1 & sleep infinity"
 
 trap 'docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true' EXIT
 
-echo "==> Preparing sandbox archive path..."
-docker exec -u 0 "$CONTAINER_NAME" sh -c 'mkdir -p /tmp && chmod 1777 /tmp && ls -ld /tmp'
-
-echo "==> Copying sandbox archive..."
-chmod a+r "$SANDBOX_TAR"
-docker cp "$(realpath "$SANDBOX_TAR")" "$CONTAINER_NAME":/tmp/sandbox.tar
-docker exec -u 0 "$CONTAINER_NAME" sh -c 'chown 0:0 /tmp/sandbox.tar && chmod 0644 /tmp/sandbox.tar && ls -l /tmp/sandbox.tar'
+echo "==> Verifying sandbox archive mount..."
+docker exec "$CONTAINER_NAME" ls -l "$SANDBOX_ARCHIVE_PATH"
 
 echo "==> Waiting for inner dockerd..."
 elapsed=0
@@ -44,8 +44,7 @@ done
 echo "    Inner dockerd ready after ${elapsed}s"
 
 echo "==> Loading sandbox image..."
-LOAD_OUTPUT=$(docker exec -u 0 "$CONTAINER_NAME" docker load -i /tmp/sandbox.tar)
-docker exec -u 0 "$CONTAINER_NAME" rm -f /tmp/sandbox.tar
+LOAD_OUTPUT=$(docker exec "$CONTAINER_NAME" docker load -i "$SANDBOX_ARCHIVE_PATH")
 LOADED_IMAGE=$(echo "$LOAD_OUTPUT" | sed -n 's/^Loaded image: //p' | tail -1)
 if [ -z "$LOADED_IMAGE" ]; then
     # Image had no tag — fall back to the image ID

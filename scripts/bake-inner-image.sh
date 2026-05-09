@@ -22,6 +22,8 @@ docker run "${DIND_BAKE_RUN_ARGS_ARRAY[@]}" -d --name "$CONTAINER_NAME" \
 
 trap 'docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true' EXIT
 
+docker exec "$CONTAINER_NAME" mkdir -p /tmp
+
 echo "==> Copying sandbox archive..."
 docker cp "$(realpath "$SANDBOX_TAR")" "$CONTAINER_NAME":/tmp/sandbox.tar
 

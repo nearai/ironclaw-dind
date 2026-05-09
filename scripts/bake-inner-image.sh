@@ -16,6 +16,20 @@ read -r -a DIND_BAKE_RUN_ARGS_ARRAY <<< "$DIND_BAKE_RUN_ARGS"
 CONTAINER_NAME="dind-bake-$$"
 SANDBOX_TAR_PATH="$(realpath "$SANDBOX_TAR")"
 SANDBOX_ARCHIVE_PATH="/tmp/sandbox.tar"
+SANDBOX_IMAGE_SOURCE="$SANDBOX_IMAGE"
+
+normalize_tag_ref() {
+    local image_ref="$1"
+    local without_digest="${image_ref%%@*}"
+
+    if [[ "$without_digest" == "$image_ref" ]]; then
+        echo "$image_ref"
+    elif [[ "$without_digest" == *:* ]]; then
+        echo "$without_digest"
+    else
+        echo "${without_digest}:latest"
+    fi
+}
 
 chmod a+r "$SANDBOX_TAR_PATH"
 
@@ -54,7 +68,11 @@ if [ -z "$LOADED_IMAGE" ]; then
     echo "ERROR: could not determine loaded image name from: $LOAD_OUTPUT" >&2
     exit 1
 fi
-SANDBOX_IMAGE="${SANDBOX_IMAGE:-$LOADED_IMAGE}"
+if [ -n "$SANDBOX_IMAGE" ]; then
+    SANDBOX_IMAGE="$(normalize_tag_ref "$SANDBOX_IMAGE")"
+else
+    SANDBOX_IMAGE="$(normalize_tag_ref "$LOADED_IMAGE")"
+fi
 if [ "$LOADED_IMAGE" != "$SANDBOX_IMAGE" ]; then
     echo "==> Tagging $LOADED_IMAGE as $SANDBOX_IMAGE..."
     docker exec "$CONTAINER_NAME" docker tag "$LOADED_IMAGE" "$SANDBOX_IMAGE"
@@ -72,6 +90,9 @@ COMMIT_ARGS=(
     -c "ENV SANDBOX_AUTO_PULL=false"
     -c "LABEL sandbox.image=$SANDBOX_IMAGE"
 )
+if [ -n "$SANDBOX_IMAGE_SOURCE" ] && [ "$SANDBOX_IMAGE_SOURCE" != "$SANDBOX_IMAGE" ]; then
+    COMMIT_ARGS+=(-c "LABEL sandbox.image.source=$SANDBOX_IMAGE_SOURCE")
+fi
 if [ -n "$IRONCLAW_SOURCE_DIGEST" ]; then
     COMMIT_ARGS+=(-c "LABEL ironclaw.source.digest=$IRONCLAW_SOURCE_DIGEST")
 fi

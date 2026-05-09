@@ -40,6 +40,7 @@ echo "    Inner dockerd ready after ${elapsed}s"
 
 echo "==> Loading sandbox image..."
 LOAD_OUTPUT=$(docker exec "$CONTAINER_NAME" docker load -i /tmp/sandbox.tar)
+docker exec "$CONTAINER_NAME" rm -f /tmp/sandbox.tar
 LOADED_IMAGE=$(echo "$LOAD_OUTPUT" | sed -n 's/^Loaded image: //p' | tail -1)
 if [ -z "$LOADED_IMAGE" ]; then
     # Image had no tag — fall back to the image ID

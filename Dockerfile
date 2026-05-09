@@ -22,7 +22,9 @@ RUN apt-get update \
     && sed -i '/C\.UTF-8 UTF-8/s/^# *//' /etc/locale.gen \
     && locale-gen \
     && rm -f /etc/ssh/ssh_host_* \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /tmp \
+    && chmod 1777 /tmp
 
 # Consistent locale for interactive shells
 ENV LANG=C.UTF-8 \

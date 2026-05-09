@@ -1,6 +1,6 @@
 # IronClaw Docker-in-Docker
 
-Thin wrapper on [nearaidev/ironclaw](https://hub.docker.com/r/nearaidev/ironclaw) that adds `dockerd` so IronClaw can run sandboxed workloads in nested containers. Requires Sysbox or `--privileged`.
+Thin wrapper on [nearaidev/ironclaw](https://hub.docker.com/r/nearaidev/ironclaw) that adds `dockerd` so IronClaw can run sandboxed workloads in nested containers. Sysbox is the preferred runtime; `--privileged` can be used as a less-isolated fallback when Sysbox is unavailable or unsupported.
 
 ## What it adds
 
@@ -33,8 +33,8 @@ bash scripts/build-dind-image.sh ironclaw-dind nearaidev/ironclaw:<tag> <source-
 ```
 
 The bake step starts a temporary DinD container with `--runtime=sysbox-runc` by
-default. For local Docker Desktop checks without Sysbox, use
-`DIND_BAKE_RUN_ARGS=--privileged`.
+default. On hosts where Sysbox is unavailable or unsupported, set
+`DIND_BAKE_RUN_ARGS=--privileged` as a less-isolated compatibility fallback.
 
 ## Run
 

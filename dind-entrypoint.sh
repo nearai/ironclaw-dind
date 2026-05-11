@@ -156,8 +156,8 @@ ensure_sandbox_image() {
         return 0
     fi
 
-    echo "WARNING: Sandbox image ${SANDBOX_IMAGE} is missing from inner Docker." >&2
-    echo "WARNING: Rebuild ironclaw-dind with scripts/build-dind-image.sh or set SANDBOX_PULL_IF_MISSING=true." >&2
+    echo "ERROR: Sandbox image ${SANDBOX_IMAGE} is missing from inner Docker." >&2
+    echo "ERROR: Startup will abort unless you rebuild ironclaw-dind with scripts/build-dind-image.sh or set SANDBOX_PULL_IF_MISSING=true." >&2
     return 1
 }
 

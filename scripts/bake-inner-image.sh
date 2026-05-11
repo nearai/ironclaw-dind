@@ -15,34 +15,34 @@ read -r -a DIND_BAKE_RUN_ARGS_ARRAY <<< "$DIND_BAKE_RUN_ARGS"
 
 CONTAINER_NAME="dind-bake-$$"
 SANDBOX_TAR_PATH="$(realpath "$SANDBOX_TAR")"
-SANDBOX_ARCHIVE_PATH="/tmp/sandbox.tar"
 SANDBOX_IMAGE_SOURCE="$SANDBOX_IMAGE"
 
 normalize_tag_ref() {
     local image_ref="$1"
     local without_digest="${image_ref%%@*}"
+    local digest_ref="${image_ref#*@}"
+    local synthetic_tag
 
     if [[ "$without_digest" == "$image_ref" ]]; then
         echo "$image_ref"
     elif [[ "$without_digest" == *:* ]]; then
         echo "$without_digest"
     else
-        echo "${without_digest}:latest"
+        if [[ "$digest_ref" == sha256:* ]]; then
+            synthetic_tag="sha-${digest_ref#sha256:}"
+        else
+            synthetic_tag="digest-${digest_ref//:/-}"
+        fi
+        echo "${without_digest}:${synthetic_tag:0:128}"
     fi
 }
 
-chmod a+r "$SANDBOX_TAR_PATH"
-
 echo "==> Starting temporary DinD container from $DIND_IMAGE..."
 docker run "${DIND_BAKE_RUN_ARGS_ARRAY[@]}" -d --name "$CONTAINER_NAME" \
-    -v "${SANDBOX_TAR_PATH}:${SANDBOX_ARCHIVE_PATH}:ro" \
     --entrypoint /bin/sh \
     "$DIND_IMAGE" -c "dockerd > /var/log/dockerd.log 2>&1 & sleep infinity"
 
 trap 'docker rm -f "$CONTAINER_NAME" > /dev/null 2>&1 || true' EXIT
-
-echo "==> Verifying sandbox archive mount..."
-docker exec "$CONTAINER_NAME" ls -l "$SANDBOX_ARCHIVE_PATH"
 
 echo "==> Waiting for inner dockerd..."
 elapsed=0
@@ -58,7 +58,7 @@ done
 echo "    Inner dockerd ready after ${elapsed}s"
 
 echo "==> Loading sandbox image..."
-LOAD_OUTPUT=$(docker exec "$CONTAINER_NAME" docker load -i "$SANDBOX_ARCHIVE_PATH")
+LOAD_OUTPUT=$(docker exec -i "$CONTAINER_NAME" docker load < "$SANDBOX_TAR_PATH")
 LOADED_IMAGE=$(echo "$LOAD_OUTPUT" | sed -n 's/^Loaded image: //p' | tail -1)
 if [ -z "$LOADED_IMAGE" ]; then
     # Image had no tag — fall back to the image ID

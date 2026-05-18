@@ -50,6 +50,7 @@ jobs:
 
           echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
           echo "image=nearaidev/ironclaw:$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "worker_image=nearaidev/ironclaw-worker:$RAW_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -120,6 +121,8 @@ jobs:
 
       - name: Build DinD image
         if: steps.check.outputs.skip != 'true' && steps.tag_guard.outputs.skip != 'true'
+        env:
+          SANDBOX_IMAGE: ${{ steps.resolve.outputs.worker_image }}
         run: |
           bash ./scripts/build-dind-image.sh \
             "${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}" \
@@ -170,6 +173,7 @@ jobs:
             echo ""
             echo "- tag: \`${{ env.IMAGE_NAME }}:${{ steps.resolve.outputs.tag }}\`"
             echo "- ironclaw: \`${{ steps.resolve.outputs.image }}\` (v${{ steps.version.outputs.version }})"
+            echo "- ironclaw-worker: \`${{ steps.resolve.outputs.worker_image }}\`"
             echo "- source digest: \`${{ steps.digest.outputs.upstream }}\`"
             echo "- ironclaw-dind digest: \`${{ steps.dind_digest.outputs.digest }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

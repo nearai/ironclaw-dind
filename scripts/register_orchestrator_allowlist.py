@@ -118,7 +118,7 @@ def main() -> int:
     payload = {
         "ref": args.image_ref,
         "label": args.label,
-        "service_type": args.service_type,
+        "service_types": {args.service_type: True},
         "status": "allow-create",
         "preferred": 0,
         "note": note,

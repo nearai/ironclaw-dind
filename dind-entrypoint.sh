@@ -8,6 +8,12 @@ set -euo pipefail
 
 IRONCLAW_USER="${IRONCLAW_USER:-ironclaw}"
 
+# Test helper: allow building/running an intentionally broken image version.
+if [ "${IRONCLAW_FORCE_STARTUP_FAILURE:-0}" = "1" ]; then
+    echo "ERROR: Forced startup failure (IRONCLAW_FORCE_STARTUP_FAILURE=1)" >&2
+    exit "${IRONCLAW_FORCE_STARTUP_FAILURE_CODE:-42}"
+fi
+
 # Ensure a same-named group exists even on systems where useradd doesn't create user-private groups.
 if ! getent group "${IRONCLAW_USER}" >/dev/null 2>&1; then
     echo "Group '${IRONCLAW_USER}' not in group database — creating with groupadd"
